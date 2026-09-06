@@ -1,0 +1,1 @@
+﻿const r=require('express').Router(),c=require('../controllers/logController'),{requireAuth,requireRole}=require('../middleware/auth');r.use(requireAuth,requireRole('admin'));r.get('/',c.list);r.get('/:id',c.get);module.exports=r;

@@ -1,0 +1,13 @@
+﻿const express=require('express');
+const controller=require('../controllers/officerController');
+const {requireAuth,requireRole}=require('../middleware/auth');
+const router=express.Router();
+router.use(requireAuth,requireRole('admin'));
+router.get('/',controller.list);
+router.get('/:id',controller.get);
+router.post('/',controller.create);
+router.put('/:id',controller.update);
+router.patch('/:id/status',controller.status);
+router.patch('/:id/unlock',controller.unlock);
+router.post('/:id/reset-password',controller.resetPassword);
+module.exports=router;

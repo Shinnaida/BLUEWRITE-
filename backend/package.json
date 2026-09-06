@@ -1,0 +1,31 @@
+{
+  "name": "bluewrite-backend",
+  "version": "0.1.0",
+  "description": "BLUEWRITE Express REST API backend",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test/aiSafety.test.js && node test/authSecurity.test.js && node test/reportFlow.test.js",
+    "test:ai-safety": "node test/aiSafety.test.js",
+    "test:auth-security": "node test/authSecurity.test.js",
+    "backup": "bash scripts/backup.sh",
+    "restore": "bash scripts/restore.sh"
+  },
+  "overrides": {
+    "mysql2": "$mysql2"
+  },
+  "dependencies": {
+    "@google/genai": "^2.21.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-mysql-session": "^3.0.3",
+    "express-rate-limit": "^8.6.2",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
+    "mysql2": "^3.23.3",
+    "nodemailer": "^9.1.1"
+  }
+}

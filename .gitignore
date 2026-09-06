@@ -1,0 +1,37 @@
+# BLUEWRITE — root gitignore (safety net; backend/ and frontend/ have their own)
+
+# Environment / secrets — never commit
+.env
+.env.*
+*.env
+!*.env.example
+!backend/.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+frontend/dist-ssr/
+
+# Database dumps
+backend/backups/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local tooling
+.claude/
+.agents/

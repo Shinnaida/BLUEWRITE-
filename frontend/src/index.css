@@ -1,0 +1,352 @@
+/* BLUEWRITE — Global Styles */
+/* Tailwind CSS v4 import + BLUEWRITE base styles */
+
+@import 'tailwindcss';
+
+/* BLUEWRITE — Secure Terminal / CRT scanline backdrop design tokens.
+   Palette: near-black navy, electric cyan accent.
+   Fonts: Inter + JetBrains Mono. */
+@theme {
+  /* Palette */
+  --color-void: #030712; /* page background (near-black) */
+  --color-panel: #0A1120; /* card / panel fill */
+  --color-panel-raised: #0F1C33; /* nested surfaces */
+  --color-line: #1E293B; /* hairline borders, grid lines */
+  --color-line-bright: #374151; /* input borders */
+  --color-cyan: #00F0FF; /* primary accent — glows, active borders, icons */
+  --color-cyan-dim: #6B7A8C; /* inactive icons, subtle accents */
+  --color-teal-text: #00F0FF; /* status / label text (cyan in this design) */
+  --color-green-ok: #3ED598; /* success states */
+  --color-amber: #F59E0B; /* advisory / warning */
+  --color-red-error: #EF4444; /* error border */
+  --color-red-error-text: #F87171; /* error text */
+  --color-red-error-bg: #450A0A; /* error banner fill */
+  --color-paper: #FFFFFF; /* primary headline text */
+  --color-steel: #9CA3AF; /* secondary / body copy */
+
+  /* Police blue scale (previously defined in tailwind.config.js, which is
+     not loaded under Tailwind v4 — tokens must live here in @theme). */
+  --color-police-blue-50: #EFF6FF;
+  --color-police-blue-100: #DBEAFE;
+  --color-police-blue-200: #BFDBFE;
+  --color-police-blue-300: #93C5FD;
+  --color-police-blue-400: #60A5FA;
+  --color-police-blue-500: #3B82F6;
+  --color-police-blue-600: #2563EB;
+  --color-police-blue-700: #1D4ED8;
+  --color-police-blue-800: #1E40AF;
+
+  /* Typography — two families total (sans + mono). */
+  --font-display-hud: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono-hud: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Menlo, monospace;
+  --font-body-hud: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   BLUEWRITE HUD — glitch animation (top-bar clock seconds digits).
+   Brief per-frame scramble (via JS glyph substitution) + a 180ms RGB-split /
+   micro-jitter CSS animation that runs each time the seconds tick over.
+   Gated behind prefers-reduced-motion: reduced users see the plain digits.
+   --------------------------------------------------------------------------- */
+@keyframes hud-glitch-jitter {
+  0% {
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
+  20% {
+    transform: translate(-1px, 1px);
+    text-shadow:
+      -1.5px 0 rgba(239, 68, 68, 0.8),
+      1.5px 0 rgba(0, 240, 255, 0.8);
+  }
+  45% {
+    transform: translate(1px, -1px);
+    text-shadow:
+      1.5px 0 rgba(239, 68, 68, 0.65),
+      -1.5px 0 rgba(0, 240, 255, 0.65);
+  }
+  70% {
+    transform: translate(-0.5px, 0);
+    text-shadow:
+      -1px 0 rgba(239, 68, 68, 0.4),
+      1px 0 rgba(0, 240, 255, 0.4);
+  }
+  100% {
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
+}
+
+.hud-glitch {
+  display: inline-block;
+  animation: hud-glitch-jitter 180ms steps(4, end);
+}
+
+.hud-glitch-char {
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-glitch {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   BLUEWRITE HUD — periodic RGB channel-split glitch (hero wordmark + panel
+   heading). Ghost layers copy the base text in cyan + magenta/pink, each
+   clipped to a thin horizontal "slice" and offset vertically/translated,
+   then snap back to a single clean resting state. Hard steps(1, end) jumps
+   give the jump-cut "signal tear" look instead of a smooth wobble.
+   --------------------------------------------------------------------------- */
+.hud-glitch-ghost {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, clip-path, opacity;
+  z-index: 20;
+}
+
+.hud-glitch-ghost-a {
+  color: #00f0ff; /* cyan ghost */
+}
+
+.hud-glitch-ghost-b {
+  color: #e0498f; /* desaturated magenta ghost */
+}
+
+.hud-glitch-ghost-a.hud-glitch-active {
+  animation: hud-glitch-burst-a 280ms steps(1, end) both;
+}
+
+.hud-glitch-ghost-b.hud-glitch-active {
+  animation: hud-glitch-burst-b 280ms steps(1, end) both;
+}
+
+@keyframes hud-glitch-burst-a {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 0 62% 0);
+    transform: translate(0, 0);
+  }
+  20% {
+    opacity: 1;
+    clip-path: inset(0 0 40% 0);
+    transform: translate(-16px, 6px);
+    text-shadow: 
+      -8px 0 rgba(0, 240, 255, 1),
+      -16px 0 rgba(0, 240, 255, 0.6);
+  }
+  40% {
+    opacity: 1;
+    clip-path: inset(5% 0 25% 0);
+    transform: translate(-22px, -6px);
+    text-shadow: 
+      -12px 0 rgba(0, 240, 255, 1),
+      -22px 0 rgba(0, 240, 255, 0.5);
+  }
+  60% {
+    opacity: 1;
+    clip-path: inset(0 0 45% 0);
+    transform: translate(-14px, 4px);
+    text-shadow: 
+      -8px 0 rgba(0, 240, 255, 0.9),
+      -16px 0 rgba(0, 240, 255, 0.4);
+  }
+  80% {
+    opacity: 0.8;
+    clip-path: inset(2% 0 38% 0);
+    transform: translate(-8px, -3px);
+    text-shadow: 
+      -4px 0 rgba(0, 240, 255, 0.7),
+      -8px 0 rgba(0, 240, 255, 0.3);
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 62% 0);
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
+}
+
+@keyframes hud-glitch-burst-b {
+  0% {
+    opacity: 0;
+    clip-path: inset(58% 0 0 0);
+    transform: translate(0, 0);
+  }
+  20% {
+    opacity: 1;
+    clip-path: inset(38% 0 0 0);
+    transform: translate(16px, -6px);
+    text-shadow: 
+      8px 0 rgba(224, 73, 143, 1),
+      16px 0 rgba(224, 73, 143, 0.6);
+  }
+  40% {
+    opacity: 1;
+    clip-path: inset(25% 0 10% 0);
+    transform: translate(22px, 6px);
+    text-shadow: 
+      12px 0 rgba(224, 73, 143, 1),
+      22px 0 rgba(224, 73, 143, 0.5);
+  }
+  60% {
+    opacity: 1;
+    clip-path: inset(42% 0 0 0);
+    transform: translate(14px, -4px);
+    text-shadow: 
+      8px 0 rgba(224, 73, 143, 0.9),
+      16px 0 rgba(224, 73, 143, 0.4);
+  }
+  80% {
+    opacity: 0.8;
+    clip-path: inset(38% 0 3% 0);
+    transform: translate(8px, 3px);
+    text-shadow: 
+      4px 0 rgba(224, 73, 143, 0.7),
+      8px 0 rgba(224, 73, 143, 0.3);
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(58% 0 0 0);
+    transform: translate(0, 0);
+    text-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-glitch-ghost.hud-glitch-active {
+    animation: none;
+  }
+}
+
+@keyframes otp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.animate-otp-shake {
+  animation: otp-shake 400ms ease-in-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-otp-shake {
+    animation: none;
+  }
+}
+
+/* Chat message entrance (CreateReportPage chat thread) */
+@keyframes bubble-in {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-bubble-in {
+  animation: bubble-in 0.18s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-bubble-in {
+    animation: none;
+  }
+}
+
+@layer base {
+  html {
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  body {
+    @apply bg-void text-paper antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: #dbeafe;
+    color: #0f172a;
+  }
+}
+
+@layer utilities {
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl space-y-6;
+  }
+
+  .section-card {
+    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6;
+  }
+
+  .section-title {
+    @apply text-base font-bold text-slate-900 sm:text-lg;
+  }
+
+  .section-description {
+    @apply mt-1 text-sm leading-6 text-slate-600;
+  }
+
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 7px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 9999px;
+  }
+
+  .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+
+  @media print {
+    aside,
+    body > header,
+    button,
+    .no-print {
+      display: none !important;
+    }
+
+    main {
+      padding: 0 !important;
+    }
+
+    .print-report {
+      display: block !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .print-report section,
+    .print-report header {
+      break-inside: avoid;
+    }
+
+    @page {
+      size: A4;
+      margin: 15mm;
+    }
+
+    .print-report {
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+  }
+}
