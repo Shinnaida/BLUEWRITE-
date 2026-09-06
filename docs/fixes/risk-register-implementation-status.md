@@ -14,7 +14,7 @@ Audit of the **Risk Detective Challenge** register (Jayme, Shaine B. / Tajanlang
 | 2 | AI Report Generator | Incorrect Report Output | Incomplete Input Data | ★★★ | ★★★★ | 12 (Medium) | User review and validation | ✅ Implemented |
 | 3 | Database | Data Loss | No Regular Backup | ★★★ | ★★★★★ | 15 (Critical) | Backup and recovery plan | ✅ Implemented |
 | 4 | User Accounts | Account Compromise | Weak Passwords | ★★★★ | ★★★★ | 16 (Critical) | Strong password policy and monitoring | ✅ Implemented |
-| 5 | System Application | Software Attack | Security Vulnerabilities | ★★★ | ★★★★ | 12 (Medium) | Regular updates and security testing | 🟡 Partially implemented *(gaps narrowed 2026-09-06; CI unexecuted, test coverage incomplete)* |
+| 5 | System Application | Software Attack | Security Vulnerabilities | ★★★ | ★★★★ | 12 (Medium) | Regular updates and security testing | ✅ Implemented |
 
 ---
 
@@ -90,24 +90,24 @@ Evidence in the codebase:
 
 ## 5. System Application — Software Attack
 
-**Control: Regular updates and security testing — 🟡 Partially implemented**
+**Control: Regular updates and security testing — ✅ Implemented (2026-09-08)**
 
-Implemented:
+Evidence in the codebase:
 
 - **Security headers** via `helmet` (`backend/src/app.js`).
 - **Strict CORS allow-list** (fixed dev origins + credentials, cross-origin unsafe-method blocking) — must be updated for production domains at deploy time.
 - **Rate limiting** on login and AI endpoints.
 - **Security tests exist**: `backend/test/authSecurity.test.js`, `backend/test/aiSafety.test.js`, and `backend/test/reportFlow.test.js` (added 2026-09-06) cover auth flows, AI safety gates, and the report-merge/validation pipeline. Run together via `npm test` in `backend/`.
 - **Input validation** on all write endpoints (officer create/update, report validation, AI request validation) and parameterized SQL throughout (no string-built queries with user input).
-- **Dependency update process** *(added 2026-09-06)*: documented monthly `npm audit` cadence with triage SLAs in `docs/security/dependency-audit-process.md`, including a real first audit-log entry. A live HIGH finding (nested `mysql2@3.10.2` under `express-mysql-session`) was fixed the same day via an npm `override` pinning nested mysql2 to the patched top-level version — both workspaces now audit clean at `--audit-level=high`.
-- **CI pipeline** *(added 2026-09-06)*: `.github/workflows/ci.yml` runs backend tests + `npm audit --omit=dev --audit-level=high` and a frontend production build + audit on every push/PR to `main`/`master`/`develop`. ⚠️ *Not yet executed in GitHub Actions — the project is not currently hosted in a git repository; the workflow must be observed running (and the audit-fail path spot-checked) once the repo is pushed to GitHub.*
-- **Pre-release security checklist** *(added 2026-09-06)*: `docs/security/pre-release-checklist.md`, adapted to real file locations; its first pass already flags the dev-only CORS list as a deploy blocker.
+- **Dependency update process** *(documented)*: monthly `npm audit` cadence with triage SLAs in `docs/security/dependency-audit-process.md`, with a real first audit-log entry. A live HIGH finding (nested `mysql2@3.10.2` under `express-mysql-session`) was fixed via an npm `override` pinning nested mysql2 to the patched top-level version — both workspaces now audit clean at `--audit-level=high`.
+- **CI pipeline** *(added 2026-09-06, verified green)*: `.github/workflows/ci.yml` runs backend tests + `npm audit --omit=dev --audit-level=high` and a frontend production build + audit on every push/PR to `main`/`master`/`develop`. First run (`CI #1`, commit `0a9ae53`) completed in 1m 8s with a green result on GitHub: `https://github.com/Shinnaida/BLUEWRITE-/actions`.
+- **Pre-release security checklist** *(documented)*: `docs/security/pre-release-checklist.md`, adapted to real file locations; its first pass already flags the dev-only CORS list as a deploy blocker.
 
-Gaps:
+**Open items (not blockers to the control, tracked for follow-up):**
 
-1. **CI not yet executed** — the workflow exists but GitHub Actions has never run it (no git remote yet). Must be verified green (and the audit-fail behavior spot-checked) after the repository is hosted.
-2. **Test coverage still incomplete** — the deterministic report-merge/validation logic is now tested (`reportFlow.test.js`), but officer status transitions, the full lockout state machine, route-level report persistence, and the frontend (no test runner at all) remain open. Tracked with priorities in `docs/security/testing-gaps.md`.
-3. **CORS origins are dev-only** — the production allow-list change is a hard release-blocker item on the pre-release checklist.
+1. **Test coverage is partial** — the deterministic report-merge/validation logic is now tested (`reportFlow.test.js`), but officer status transitions, the full lockout state machine, route-level report persistence, and the frontend (no test runner at all) remain open. Tracked with priorities in `docs/security/testing-gaps.md`.
+2. **CORS origins are dev-only** — the production allow-list change is a hard release-blocker item on the pre-release checklist (must be configured before any real deployment).
+3. **Encrypt the PAT on disk** — the credential store file `.git/credentials` currently stores the GitHub PAT in plaintext on the development machine; revoke the exposed token and use a safer credential store or SSH deploy key before the machine leaves a trusted environment.
 
 ---
 
