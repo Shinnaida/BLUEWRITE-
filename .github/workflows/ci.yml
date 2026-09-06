@@ -23,6 +23,31 @@ jobs:
     defaults:
       run:
         working-directory: backend
+
+    # authSecurity.test.js exercises real login/lockout/ownership flows against
+    # MySQL; this container gives CI the same engine as the dev setup (8.4).
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bluewrite_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: bluewrite_db
+      SESSION_SECRET: ci-only-session-secret-not-real
+
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +60,21 @@ jobs:
 
       - name: Install dependencies (clean, lockfile-exact)
         run: npm ci
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            if mysql -h 127.0.0.1 -P 3306 -u root -proot -e "SELECT 1" >/dev/null 2>&1; then
+              echo "MySQL is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MySQL did not become ready in time"; exit 1
+
+      - name: Load schema and seed data
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -u root -proot < database/schema.sql
+          mysql -h 127.0.0.1 -P 3306 -u root -proot bluewrite_db < database/seed.sql
 
       - name: Run tests
         run: npm test
