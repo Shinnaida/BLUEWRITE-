@@ -55,6 +55,20 @@ const env = {
     maxOutputTokens: Math.min(4000, Math.max(128, integer(process.env.GEMINI_MAX_OUTPUT_TOKENS, 1200))),
     retryDelayMs: Math.min(5000, Math.max(0, integer(process.env.GEMINI_RETRY_DELAY_MS, 750))),
   },
+
+  ollama: {
+    // When only=true the application uses the local Ollama model exclusively and
+    // never calls Google AI Studio. The Gemini integration stays available for
+    // OLLAMA_ONLY=false (the default), where Ollama handles extraction first and
+    // Gemini handles everything else.
+    only: String(process.env.OLLAMA_ONLY || '').toLowerCase() === 'true',
+    enabled: process.env.OLLAMA_ENABLED !== 'false',
+    baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+    model: process.env.OLLAMA_MODEL || 'llama3.2:3b',
+    timeoutMs: Math.min(60000, Math.max(2000, integer(process.env.OLLAMA_TIMEOUT_MS, 20000))),
+    generateTimeoutMs: Math.min(600000, Math.max(5000, integer(process.env.OLLAMA_GENERATE_TIMEOUT_MS, 120000))),
+    numPredict: Math.min(4000, Math.max(128, integer(process.env.OLLAMA_NUM_PREDICT, 1200))),
+  },
 };
 
 module.exports = env;

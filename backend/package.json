@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node test/aiSafety.test.js && node test/authSecurity.test.js && node test/reportFlow.test.js",
+    "test": "node test/aiSafety.test.js && node test/authSecurity.test.js && node test/reportFlow.test.js && node test/reportDetailFields.test.js",
     "test:ai-safety": "node test/aiSafety.test.js",
     "test:auth-security": "node test/authSecurity.test.js",
     "backup": "bash scripts/backup.sh",

@@ -1,0 +1,92 @@
+/* BLUEWRITE — AI generation loading panel animations */
+
+/* Soft rotating halo behind the sparkles badge */
+@keyframes bw-halo-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Gentle breathing pulse on the badge core */
+@keyframes bw-core-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
+}
+
+/* Stage message crossfade */
+@keyframes bw-stage-in {
+  0% { opacity: 0; transform: translateY(5px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Reassuring eased progress: fast start, long glide toward ~92% */
+@keyframes bw-progress-glide {
+  0% { width: 4%; }
+  12% { width: 26%; }
+  30% { width: 47%; }
+  55% { width: 68%; }
+  80% { width: 84%; }
+  100% { width: 92%; }
+}
+
+/* Skeleton shimmer sweep */
+@keyframes bw-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(220%); }
+}
+
+/* Floating dots under the badge */
+@keyframes bw-dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
+.bw-halo {
+  animation: bw-halo-spin 2.6s linear infinite;
+}
+
+.bw-core {
+  animation: bw-core-pulse 1.9s ease-in-out infinite;
+}
+
+.bw-stage-text {
+  animation: bw-stage-in 0.45s ease-out both;
+}
+
+.bw-progress-bar {
+  animation: bw-progress-glide 200s cubic-bezier(0.22, 0.68, 0.36, 1) forwards;
+}
+
+.bw-progress-bar--fast {
+  animation-duration: 24s;
+}
+
+.bw-shimmer-line {
+  position: relative;
+  overflow: hidden;
+}
+
+.bw-shimmer-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.14), transparent);
+  animation: bw-shimmer 1.9s ease-in-out infinite;
+}
+
+.bw-shimmer-line:nth-child(2)::after { animation-delay: 0.25s; }
+.bw-shimmer-line:nth-child(3)::after { animation-delay: 0.5s; }
+.bw-shimmer-line:nth-child(4)::after { animation-delay: 0.75s; }
+
+.bw-dot {
+  animation: bw-dot-bounce 1.3s ease-in-out infinite;
+}
+
+.bw-dot:nth-child(2) { animation-delay: 0.15s; }
+.bw-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bw-halo, .bw-core, .bw-stage-text, .bw-progress-bar, .bw-shimmer-line::after, .bw-dot {
+    animation: none;
+  }
+}

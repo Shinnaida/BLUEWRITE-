@@ -1,4 +1,7 @@
 process.env.NODE_ENV = 'test';
+// The unconfigured-provider assertions below target the Google AI Studio path;
+// local Ollama mode is verified at runtime instead.
+process.env.OLLAMA_ONLY = 'false';
 process.env.LOGIN_DELAY_THIRD_MS = '0';
 process.env.LOGIN_DELAY_FOURTH_MS = '0';
 process.env.MAIL_MODE = 'json';

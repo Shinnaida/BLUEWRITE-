@@ -43,6 +43,14 @@ export async function submitReport(id) {
   return api.patch(`/reports/${id}/submit`);
 }
 
+/**
+ * Delete a draft report (Officer's own drafts only).
+ * DELETE /api/reports/:id
+ */
+export async function deleteReport(id) {
+  return api.delete(`/reports/${id}`);
+}
+
 export async function recordReportPrint(id) {
   return api.post(`/reports/${id}/print`);
 }

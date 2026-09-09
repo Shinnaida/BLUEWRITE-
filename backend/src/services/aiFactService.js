@@ -1,4 +1,7 @@
 // Deterministic safeguards that remain independent of the language model.
+// The language glossary is static data (no model calls) and provides the
+// cross-language bridge so translated output is not flagged as invented.
+const { UNCERTAINTY_EQUIVALENTS, uncertaintySurvived } = require('../prompts/languageGlossary');
 const text = (value, max = 12000) => String(value ?? '').trim().slice(0, max);
 const sentenceList = (value) => text(value, 30000).match(/[^.!?\n]+(?:[.!?]+|$)/g)?.map((part) => part.trim()).filter(Boolean) || [];
 const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
@@ -12,12 +15,12 @@ const FACT_SCHEMA = Object.freeze({
 });
 
 const CLOTHING = ['cap', 'hat', 'shirt', 'jacket', 'hoodie', 'pants', 'shorts', 'shoes', 'dress', 'uniform', 't-shirt', 'tee', 'coat', 'vest'];
-const UNCERTAINTY = ['not sure', 'not certain', 'not confirmed', 'possibly', 'possible', 'around', 'approximately', 'approximate', 'about', 'appeared', 'appears', 'may', 'might', 'could', 'unknown', 'estimated', 'reportedly', 'allegedly', 'believes', 'believed', 'unconfirmed', 'alleged', 'claimed'];
+const UNCERTAINTY = ['not sure', 'not certain', 'not confirmed', 'possibly', 'possible', 'around', 'approximately', 'approximate', 'about', 'appeared', 'appears', 'may', 'might', 'could', 'unknown', 'estimated', 'reportedly', 'allegedly', 'believes', 'believed', 'unconfirmed', 'alleged', 'claimed', ...Object.keys(UNCERTAINTY_EQUIVALENTS)];
 const PENDING = /\b(not yet|has not|hasn't|have not|could not|couldn't|unable to|unavailable|will (?:be|review|follow)|tomorrow|pending|to be reviewed|for follow-up|not been|still for review)\b/i;
 const COMPLETED = /\b(reviewed|obtained|collected|recovered|confirmed|verified|interviewed|arrested|seized|located)\b/i;
 const ACTION = /\b(responded|arrived|observed|noticed|requested|advised|informed|checked|searched|patrolled|questioned|interviewed|confiscated|documented|examined|secured|canvassed|reviewed|obtained|collected|recovered|confirmed|verified|arrested|seized|located)\b/i;
 const EVIDENCE = /\b(cctv|footage|evidence|weapon|recovered|seized|collected|photograph|photo|recording)\b/i;
-const PROPERTY = /\b(wallet|motorcycle|phone|bag|purse|bicycle|vehicle|car|item|property|laptop|jewelry|jewellery|cash|money)\b/i;
+const PROPERTY = /\b(wallet|motorcycle|phone|cellphone|bag|purse|bicycle|tricycle|vehicle|car|item|property|laptop|jewelry|jewellery|cash|money|gun|firearm|knife|bolo|shabu)\b/i;
 const OBSERVATION = /\b(saw|observed|noticed|standing|walking|leaving|near|toward|heading toward)\b/i;
 const ROLE_WORD = /\b(suspect|offender|perpetrator|complainant|victim|witness|person of interest)\b/gi;
 const GUILT = /\b(guilty|intentionally|deliberately|committed the theft|stole the)\b/i;
@@ -64,6 +67,13 @@ function extractTimeMinutes(value) {
 
 function explicitTimes(value) {
   return unique((String(value || '').match(/\b\d{1,2}(?::\d{2})?\s*(?:AM|PM)\b/gi) || []).map((time) => time.replace(/\s+/g, ' ').toUpperCase()));
+}
+
+// "9:30 PM" → "21:30" — drafts may legitimately use the 24-hour form.
+function twentyFourHourAlias(value) {
+  const minutes = extractTimeMinutes(value);
+  if (minutes === null) return null;
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 }
 
 function factSimilarity(left, right) {
@@ -128,6 +138,30 @@ function buildStructuredFacts(context) {
   });
   addSegments(rawNarrative, 'officer_notes', 'narrative');
   addSegments(context.summary, 'report_summary', 'summary');
+  // Concise-form structured inputs: every short officer-entered fact becomes a
+  // sourced segment so §I–VI generation can use it (attributed, validated for
+  // support like narrative text — never treated as invented).
+  const details = (context.details && typeof context.details === 'object') ? context.details : {};
+  const DETAIL_ATTRIBUTIONS = {
+    blotter_entry_no: 'officer_structured_input',
+    evidence_description: 'officer_structured_input',
+    actions_taken: 'officer_structured_input',
+    witness_statement: 'officer_structured_input',
+  };
+  for (const [key, val] of Object.entries(details)) {
+    const content = cleanSourceSentence(String(val || ''));
+    if (!content || FORMAT_HEADING.test(content)) continue;
+    sourceOrder += 1;
+    const attribution = DETAIL_ATTRIBUTIONS[key] || 'officer_structured_input';
+    const duplicate = sourceSegments.find((segment) => semanticallyDuplicate(segment.content, content));
+    if (duplicate) {
+      duplicate.source_refs.push(`detail-${key}`);
+      duplicate.attributions = unique([...duplicate.attributions, attribution]);
+      duplicate.duplicate_count += 1;
+      continue;
+    }
+    sourceSegments.push({ id: `fact-${sourceOrder}`, content, attribution, attributions: [attribution], source_refs: [`detail-${key}`], duplicate_count: 1, source_order: sourceOrder, time_minutes: extractTimeMinutes(content), action_status: PENDING.test(content) ? 'pending_or_unavailable' : (ACTION.test(content) ? 'completed_or_observed' : 'stated_fact') });
+  }
 
   const persons = [];
   const byName = new Map();
@@ -141,7 +175,11 @@ function buildStructuredFacts(context) {
     if (!person) {
       const related = sentenceList(rawNarrative).filter((part) => normalize(part).includes(key));
       const genericIdentity = /\b(unidentified|unknown)\s+(male|female|individual|person)\b/i.test(name);
-      const displayName = genericIdentity ? name.match(/\b(unidentified|unknown)\s+(male|female|individual|person)\b/i)[0] : name;
+      // Legacy storage artifact: single names were once saved with a fabricated
+      // "Unknown" last name ("SHAINE Unknown"). The draft should never be forced
+      // to write that placeholder, so validate against the real name only.
+      const legacyUnknown = name.match(/^([^,]+?)\s+Unknown$/i);
+      const displayName = legacyUnknown ? legacyUnknown[1] : (genericIdentity ? name.match(/\b(unidentified|unknown)\s+(male|female|individual|person)\b/i)[0] : name);
       const personText = [genericIdentity ? name : '', input.statement, input.notes].filter(Boolean).join(' ');
       const narrativeDescriptions = role === 'person observed' ? related.flatMap(descriptionTokens) : [];
       person = { id: `person-${persons.length + 1}`, name: displayName, locked_role: role, source_attribution: role, age: Number.isFinite(input.age) ? input.age : null, sex: text(input.sex, 20), address: text(input.address, 500), description: unique([...descriptionTokens(personText), ...narrativeDescriptions]), statements: unique([input.statement, input.notes].filter(Boolean).map((value) => text(value, 2000))), role_sources: [{ role, source: input.source || 'extracted', canonical: Boolean(input.canonical) }] };
@@ -204,7 +242,10 @@ function buildStructuredFacts(context) {
     officer_actions: sourceSegments.filter((segment) => segment.action_status === 'completed_or_observed').map((segment) => ({ detail: segment.content, status: segment.action_status, source_ref: segment.id })),
     evidence: selectSegments(EVIDENCE),
     pending_actions: sourceSegments.filter((segment) => segment.action_status === 'pending_or_unavailable').map((segment) => ({ detail: segment.content, status: segment.action_status, source_ref: segment.id })),
-    uncertainties: UNCERTAINTY.filter((term) => hasTerm(allSource, term)),
+    // "mga" is normally the Filipino plural marker ("mga biktima" = "the
+    // victims"), not a hedge. It only signals approximation directly before a
+    // number or clock expression ("mga 5", "mga alas-3").
+    uncertainties: UNCERTAINTY.filter((term) => (term === 'mga' ? /\bmga\s+(?:alas[-\s]?\S+|\d)/i.test(allSource) : hasTerm(allSource, term))),
     conflicts,
     source_segments: sourceSegments,
   };
@@ -218,19 +259,47 @@ function cleanFactsForGeneration(facts) {
     if (conflictingLocations.some((location) => normalize(location) && normalize(event.fact).includes(normalize(location)))) return false;
     return true;
   });
+  // Explicit checklist for the model: small models reliably include facts they
+  // see as a named requirement, but silently drop trailing source sentences.
+  const coverage_required = [];
+  for (const person of facts.persons) {
+    coverage_required.push(`${person.name} (${person.locked_role})${person.statements?.length ? ` — must be reported with their statement: ${person.statements.join(' ')}` : ' — must be mentioned'}`);
+  }
+  for (const pending of facts.pending_actions || []) coverage_required.push(`Pending/unavailable — must NOT be presented as completed: ${pending.detail}`);
+  const uniqueUncertainties = [...new Set(facts.uncertainties)];
+  if (uniqueUncertainties.length) coverage_required.push(`Keep these uncertainty markers in the narrative wording: ${uniqueUncertainties.join(', ')}`);
+
+  // Short structured inputs surfaced for the model as a labeled map so the
+  // generate prompt can use every officer-entered fact (blotter no., evidence,
+  // actions taken, case status, type-specific fields, ...).
+  const detailFacts = (facts.source_segments || [])
+    .filter((segment) => (segment.source_refs || []).some((ref) => String(ref).startsWith('detail-')))
+    .map((segment) => ({ detail: segment.content, ref: segment.source_refs.find((ref) => String(ref).startsWith('detail-')), attribution: segment.attribution, action_status: segment.action_status }));
+
   return {
     schema_version: facts.schema_version,
-    output_contract: 'Return one continuous narrative paragraph. Narrative prose only. No headings, labels, bullets, JSON, analysis, or validation messages.',
+    output_contract: 'Return numbered-paragraph narrative prose ("1. … 2. … 3. …"). No headings, labels, JSON, analysis, or validation messages. Cover every fact listed below in complete, formal sentences, and satisfy every item in coverage_required.',
     incident: facts.incident,
-    persons: facts.persons.map(({ id, name, locked_role, source_attribution, age, sex, address, description }) => ({ id, name, locked_role, source_attribution, age, sex, address, description })),
+    detail_facts: detailFacts,
+    persons: facts.persons.map(({ id, name, locked_role, source_attribution, age, sex, address, description, statements }) => ({ id, name, locked_role, source_attribution, age, sex, address, description, statements })),
     events: safeEvents,
-    uncertainties: facts.uncertainties,
+    property: facts.property,
+    evidence: facts.evidence,
+    pending_actions: facts.pending_actions,
+    uncertainties: [...new Set(facts.uncertainties)],
+    coverage_required,
   };
 }
 
 function issue(category, message, sentence = '', removable = false) {
   return { category, message, sentence, removable };
 }
+
+// Meta-commentary patterns: sentences where a small model narrates the task
+// ("the report covers all the facts...") instead of the incident itself.
+// Removing these is deterministic cleanup, never fact removal — every fact in a
+// meta sentence also appears as a real sentence elsewhere in the source facts.
+const META_COMMENTARY = /(?:\b(?:report|narrative|draft|output|response)\s+(?:is\s+one|covers|includes|ensures|contains|summarizes)|\buncertainties?\s+include\b|\bthe\s+pending\s+action\s+is\b|\bcoverage_required\b|\bmust\s+be\s+(?:mentioned|reported)\b|\bno\s+facts\s+(?:were\s+)?invented\b|\bwithout\s+inventing\b)/i;
 
 function normalizeNarrativeOutput(value) {
   const lines = text(value, 20000).replace(/```(?:text|markdown)?/gi, '').replace(/```/g, '').split(/\r?\n/);
@@ -239,9 +308,31 @@ function normalizeNarrativeOutput(value) {
     let line = rawLine.trim();
     if (!line || FORMAT_HEADING.test(line)) continue;
     line = line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').replace(FORMAT_PREFIX, '').replace(FORMAT_INLINE_LABEL, ' ').trim();
-    if (line) prose.push(line);
+    if (!line) continue;
+    if (META_COMMENTARY.test(line)) {
+      // Drop only the offending sentences, keep the rest of the line.
+      const kept = sentenceList(line).filter((sentence) => !META_COMMENTARY.test(sentence));
+      if (!kept.length) continue;
+      line = kept.join(' ');
+    }
+    prose.push(line);
   }
-  return prose.join(' ').replace(/\s+/g, ' ').trim();
+  // Collapse degenerate repetition loops (a small model failure mode where one
+  // sentence repeats until the token budget is exhausted). Exact consecutive
+  // duplicates carry no additional fact, so dropping them is safe.
+  const sentences = [];
+  for (const part of prose) for (const sentence of sentenceList(part)) {
+    if (sentences.length && normalize(sentences[sentences.length - 1]) === normalize(sentence)) continue;
+    sentences.push(sentence);
+  }
+  // Rule 11 requires duplicate meaning to be removed; enforce it deterministically
+  // by dropping later sentences that are semantic duplicates of an earlier one.
+  const deduped = [];
+  for (const sentence of sentences) {
+    if (deduped.some((prior) => semanticallyDuplicate(prior, sentence))) continue;
+    deduped.push(sentence);
+  }
+  return deduped.join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function validateDraft(facts, draft, legacy = {}) {
@@ -307,14 +398,41 @@ function validateDraft(facts, draft, legacy = {}) {
   for (const event of facts.events || []) {
     const eventTimes = explicitTimes(event.fact);
     if (!eventTimes.length) continue;
-    const candidate = sentenceList(output).sort((left, right) => factSimilarity(withoutTimes(event.fact), withoutTimes(right)) - factSimilarity(withoutTimes(event.fact), withoutTimes(left)))[0];
-    if (candidate && factSimilarity(withoutTimes(event.fact), withoutTimes(candidate)) >= 0.45 && !eventTimes.some((time) => hasTerm(candidate, time))) issues.push(issue('AI_CHRONOLOGY_MISMATCH', `Time ${eventTimes.join('/')} was removed from or attached to a different event.`, candidate));
+    // A draft may legitimately render "9:30 PM" as "21:30" — accept either form.
+    const acceptedForms = eventTimes.flatMap((time) => [time, twentyFourHourAlias(time)]).filter(Boolean);
+    const scored = sentenceList(output)
+      .map((sentence, index) => ({ sentence, index, similarity: factSimilarity(withoutTimes(event.fact), withoutTimes(sentence)) }))
+      .filter((entry) => entry.similarity >= 0.45);
+    if (!scored.length) continue;
+    const bestSimilarity = Math.max(...scored.map((entry) => entry.similarity));
+    // Accept the event time from (a) any sentence nearly as similar to this
+    // event as the best match, or (b) a short time-only sentence adjacent to
+    // the best match ("It happened at 9:30 pm.") — long source sentences are
+    // often split that way. A time genuinely moved to a different event appears
+    // only in sentences matching that other event, so it stays flagged.
+    const draftSentences = sentenceList(output);
+    const bestIndex = [...scored].sort((left, right) => right.similarity - left.similarity)[0].index;
+    const timeOnly = (sentence) => {
+      const tokens = factTokens(withoutTimes(sentence));
+      return tokens.length <= 2 && /^(it\s+)?(happened|occurred|occurring|at|around|approximately|about)\b/i.test(withoutTimes(sentence).trim());
+    };
+    const carried = scored.some((entry) => bestSimilarity - entry.similarity <= 0.15 && acceptedForms.some((time) => hasTerm(entry.sentence, time)))
+      || draftSentences.some((sentence, index) => Math.abs(index - bestIndex) <= 1 && timeOnly(sentence) && acceptedForms.some((time) => hasTerm(sentence, time)));
+    if (!carried) {
+      const best = [...scored].sort((left, right) => right.similarity - left.similarity)[0];
+      issues.push(issue('AI_CHRONOLOGY_MISMATCH', `Time ${eventTimes.join('/')} was removed from or attached to a different event.`, best.sentence));
+    }
   }
   for (const term of facts.uncertainties) {
-    if (!hasTerm(output, term)) issues.push(issue('AI_UNSUPPORTED_DETAIL', `Source uncertainty marker "${term}" may have been removed.`));
+    // Accept the term itself or its documented English equivalent, so a correct
+    // Tagalog/Bisaya → English translation is not flagged as removed.
+    if (!uncertaintySurvived(output, term)) issues.push(issue('AI_UNSUPPORTED_DETAIL', `Source uncertainty marker "${term}" may have been removed.`));
   }
   for (const person of facts.persons) {
-    if (!hasTerm(output, person.name)) issues.push(issue('AI_ENTITY_MISMATCH', `Locked entity was omitted: ${person.name}`));
+    // Placeholder names like "Unidentified Male 1" are satisfied by a natural
+    // mention ("an unidentified male") in the draft.
+    const identifier = /^(unidentified|unknown)\s/i.test(person.name) ? (entityIdentity(person.name) || person.name) : person.name;
+    if (!hasTerm(output, identifier)) issues.push(issue('AI_ENTITY_MISMATCH', `Locked entity was omitted: ${person.name}`));
   }
   for (const conflict of facts.conflicts || []) {
     if (!conflict.resolved_by) issues.push(issue(conflict.category, conflict.message));

@@ -16,11 +16,17 @@ import { INCIDENT_TYPE_OPTIONS } from '../../utils/constants';
 import Toast from '../../components/common/Toast';
 import { createReport, submitReport } from '../../services/reportService';
 import { requestReportAssistance, extractReportFields } from '../../services/aiService';
+import AIReportChat from '../../components/ai/AIReportChat';
+import PrintableReport from '../../components/reports/PrintableReport';
+import { recordReportPrint } from '../../services/reportService';
 import TimePicker from '../../components/common/TimePicker';
+import Input from '../../components/common/Input';
+import Select from '../../components/common/Select';
+import Textarea from '../../components/common/Textarea';
 import {
   Send, Bot, User, AlertTriangle, CheckCircle2, X, PenLine, FileText,
-  PanelRightOpen, PanelRightClose,
 } from 'lucide-react';
+import { fieldsForIncidentType, TYPE_LABELS } from '../../utils/incidentTypeFields';
 
 const FIELD_ORDER = [
   'incident_type', 'location', 'incident_date', 'incident_time',
@@ -38,6 +44,83 @@ const FIELD_LABELS = {
   witness: 'Witness',
   summary: 'Summary',
   narrative: 'Narrative',
+  // PNP memorandum-style Investigation Report fields (header + body sections)
+  station_name: 'Station Name',
+  station_region: 'Regional Office',
+  station_address: 'Station Address',
+  station_email: 'Station Email',
+  station_contact: 'Station Contact No.',
+  recipient_office: 'Memo Recipient (FOR)',
+  authority: 'I. Authority',
+  matters_investigated: 'II. Matters to be Investigated',
+  discussion: 'IV. Discussion / Evaluation',
+  conclusion: 'V. Conclusion',
+  recommendation: 'VI. Recommendation',
+  approving_authority_name: 'Approving Authority (Name)',
+  approving_authority_rank: 'Approving Authority (Rank)',
+  // Structured incident report detail fields (10-section spec)
+  date_reported: 'Date Reported',
+  time_reported: 'Time Reported',
+  barangay: 'Barangay',
+  city: 'City / Municipality',
+  province: 'Province',
+  specific_place: 'Specific Place',
+  blotter_entry_no: 'Blotter Entry No.',
+  complainant_full_name: 'Complainant Name',
+  complainant_age: 'Complainant Age',
+  complainant_sex: 'Complainant Sex',
+  complainant_address: 'Complainant Address',
+  complainant_contact_number: 'Complainant Contact No.',
+  complainant_role: 'Complainant Role',
+  victim_full_name: 'Victim Name',
+  victim_age: 'Victim Age',
+  victim_sex: 'Victim Sex',
+  victim_address: 'Victim Address',
+  victim_contact_number: 'Victim Contact No.',
+  victim_injuries: 'Victim Injuries',
+  victim_damage_or_loss: 'Victim Damage / Loss',
+  suspect_name: 'Suspect Name',
+  suspect_alias: 'Suspect Alias',
+  suspect_age: 'Suspect Age',
+  suspect_sex: 'Suspect Sex',
+  suspect_address: 'Suspect Address',
+  suspect_physical_description: 'Suspect Description',
+  suspect_status: 'Suspect Status',
+  people_involved: 'People Involved',
+  sequence_of_events: 'Sequence of Events',
+  actions_of_suspect: 'Actions of Suspect',
+  actions_of_victim: 'Actions of Victim',
+  circumstances_before_incident: 'Circumstances Before',
+  circumstances_after_incident: 'Circumstances After',
+  property_involved: 'Property Involved',
+  property_description: 'Property Description',
+  quantity: 'Quantity',
+  estimated_value: 'Estimated Value',
+  type_of_damage: 'Type of Damage',
+  estimated_damage_cost: 'Estimated Damage Cost',
+  witness_name: 'Witness Name',
+  witness_age: 'Witness Age',
+  witness_address: 'Witness Address',
+  witness_contact_number: 'Witness Contact No.',
+  witness_statement: 'Witness Statement',
+  evidence_available: 'Evidence Available',
+  evidence_type: 'Evidence Type',
+  evidence_description: 'Evidence Description',
+  evidence_location: 'Evidence Location',
+  cctv_available: 'CCTV Available',
+  cctv_description: 'CCTV Description',
+  attached_documents: 'Attached Documents',
+  responding_officers: 'Responding Officers',
+  initial_response: 'Initial Response',
+  actions_taken: 'Actions Taken',
+  evidence_collected: 'Evidence Collected',
+  persons_interviewed: 'Persons Interviewed',
+  medical_assistance: 'Medical Assistance',
+  arrest_made: 'Arrest Made',
+  referral_or_endorsement: 'Referral / Endorsement',
+  current_case_status: 'Case Status',
+  report_date: 'Report Date',
+  report_time: 'Report Time',
 };
 
 const FIELD_PLACEHOLDERS = {
@@ -50,32 +133,231 @@ const FIELD_PLACEHOLDERS = {
   suspect: 'Name of suspect',
   witness: 'Name of witness',
   summary: 'Brief factual summary',
-  narrative: 'Full incident narrative',
+  narrative: 'Briefly describe what happened, including important actions and events.',
+  station_name: 'e.g., Quezon City Police Station',
+  station_region: 'e.g., PRO NCR',
+  station_address: 'City/Municipality, Province, ZIP',
+  station_email: 'station@example.gov.ph',
+  station_contact: 'Tel. Nr.',
+  recipient_office: 'e.g., Officer in Charge, Provincial Office',
+  authority: '1. Station Blotter Entry No. ___, dated ___  2. Inherent Police Functions  3. Standard Operating Procedure',
+  matters_investigated: 'Numbered investigative objectives',
+  discussion: 'Analysis connecting the facts to the elements of the offense charged',
+  conclusion: 'What the investigation established (who, what, when, where, how)',
+  recommendation: 'Filing of charges, referral to prosecutor\'s office, further investigation',
+  approving_authority_name: 'Chief of Police / Officer-in-Charge name',
+  approving_authority_rank: 'e.g., PCOL',
+  // Structured detail fields
+  date_reported: 'YYYY-MM-DD',
+  time_reported: 'HH:MM',
+  barangay: 'e.g., Brgy. San Isidro',
+  city: 'e.g., Quezon City',
+  province: 'e.g., Metro Manila',
+  specific_place: 'e.g., in front of No. 12 Rizal St.',
+  blotter_entry_no: 'e.g., 2023-0512',
+  complainant_full_name: 'First name, middle initial, last name',
+  complainant_age: 'e.g., 34',
+  complainant_sex: 'Select sex',
+  complainant_address: 'Residential address',
+  complainant_contact_number: 'e.g., 0917 123 4567',
+  complainant_role: "e.g., Victim's spouse, eyewitness",
+  victim_full_name: 'First name, middle initial, last name',
+  victim_age: 'e.g., 28',
+  victim_sex: 'Select sex',
+  victim_address: 'Residential address',
+  victim_contact_number: 'e.g., 0918 765 4321',
+  victim_role: 'e.g., Store owner, victim\'s spouse',
+  victim_injuries: "Injuries or loss sustained, or 'none'",
+  victim_damage_or_loss: 'Damage to property or items lost',
+  suspect_name: "Name, or 'Unidentified' if unknown",
+  suspect_alias: 'Nickname / alias, if any',
+  suspect_age: 'e.g., 25',
+  suspect_sex: 'Select sex',
+  suspect_address: 'Last known address, if known',
+  suspect_physical_description: 'Height, build, clothing, distinguishing features',
+  suspect_status: 'Select status',
+  people_involved: 'Names and roles in this incident',
+  sequence_of_events: '1) … 2) … 3) …',
+  actions_of_suspect: "Suspect's actions before, during, after",
+  actions_of_victim: "Victim's actions before, during, after",
+  circumstances_before_incident: 'Conditions leading up to it',
+  circumstances_after_incident: 'Immediately after the incident',
+  property_involved: 'e.g., Motorcycle, cellular phone',
+  property_description: 'Make, model, color, plate/serial number',
+  quantity: 'e.g., 1 unit',
+  estimated_value: 'e.g., PHP 45,000.00',
+  type_of_damage: 'e.g., Stolen, destroyed, defaced',
+  estimated_damage_cost: 'e.g., PHP 12,000.00',
+  witness_name: 'First name, middle initial, last name',
+  witness_age: 'e.g., 41',
+  witness_address: 'Residential address',
+  witness_contact_number: 'e.g., 0920 555 1234',
+  witness_statement: 'Summary of what the witness saw or knows',
+  evidence_available: 'Select',
+  evidence_type: 'e.g., Physical, documentary, testimonial',
+  evidence_description: 'Describe the evidence and its relevance',
+  evidence_location: 'Where the evidence is located / held',
+  cctv_available: 'Select',
+  cctv_description: 'Camera location, coverage, and footage details',
+  attached_documents: 'e.g., Medical certificate, photographs, sketch plan',
+  responding_officers: 'e.g., Pat. Reyes, Pat. Santos',
+  initial_response: 'How the responding team secured and processed the scene',
+  actions_taken: 'Numbered list of police actions taken',
+  evidence_collected: 'Items collected and turned over',
+  persons_interviewed: 'Names of persons interviewed',
+  medical_assistance: 'e.g., Brought to hospital / none',
+  arrest_made: 'Select',
+  referral_or_endorsement: "Referral to prosecutor's office, other units, or agencies",
+  current_case_status: 'Select status',
+  report_date: 'YYYY-MM-DD',
+  report_time: 'HH:MM',
 };
 
 const REQUIRED_FIELDS = ['incident_type', 'location', 'incident_date', 'incident_time'];
 
 // Summary sections: groups the click-to-edit cards so the main panel reads like
 // a structured report instead of one long stack. `full` fields span the grid width.
+// §III Facts of the case is the ONE AI-assisted narrative field. It stays bound
+// to the existing `narrative` field (invariant #4).
+const FACTS_FIELD = 'narrative';
+
 const SUMMARY_SECTIONS = [
   {
-    title: 'Incident Details',
-    description: 'The core facts — required before submission.',
-    fields: ['incident_type', 'incident_date', 'incident_time', 'location'],
+    title: 'Incident Information',
+    formal: 'Section 1 · Incident Information',
+    description: 'Required — when and where the incident occurred.',
+    fields: ['incident_type', 'incident_date', 'incident_time', 'location', 'specific_place', 'blotter_entry_no'],
   },
   {
-    title: 'People Involved',
-    description: 'Optional — fill only the roles you know.',
-    fields: ['complainant', 'victim', 'suspect', 'witness'],
+    title: 'Type-Specific Details',
+    description: 'Only the fields relevant to the selected incident type.',
+    fields: [],
   },
   {
-    title: 'Report Content',
-    description: 'The story of the incident in your own words.',
-    fields: ['summary', 'narrative'],
+    title: 'Complainant',
+    formal: 'Section 2 · Complainant',
+    description: 'Optional — the person who reported the incident.',
+    fields: ['complainant_full_name', 'complainant_role', 'complainant_address'],
+  },
+  {
+    title: 'Victim / Property Owner',
+    formal: 'Section 3 · Victim / Property Owner',
+    description: 'Optional — the person against whom the offense was committed.',
+    fields: ['victim_full_name', 'victim_role', 'victim_injuries'],
+  },
+  {
+    title: 'Suspect',
+    formal: 'Section 4 · Suspect',
+    description: 'Optional — the person suspected of committing the offense.',
+    fields: ['suspect_name', 'suspect_status', 'suspect_address', 'suspect_physical_description'],
+  },
+  {
+    title: 'What Happened',
+    formal: 'Section 5 · What Happened',
+    description: 'Describe the incident in your own words — the AI turns it into formal report language.',
+    fields: [FACTS_FIELD],
+  },
+  {
+    title: 'Evidence & Witnesses',
+    formal: 'Section 6 · Evidence & Witnesses',
+    description: 'Optional — evidence available and persons who witnessed the incident.',
+    fields: ['evidence_type', 'evidence_description', 'witness_name', 'witness_statement'],
+  },
+  {
+    title: 'Police Action',
+    formal: 'Section 7 · Police Action',
+    description: 'Optional — who responded, what was done, and where the case stands.',
+    fields: ['responding_officers', 'actions_taken', 'current_case_status'],
+  },
+  {
+    title: 'Reporting Officer',
+    formal: 'Section 8 · Reporting Officer',
+    description: 'Investigator identity is auto-attached from the officer record; enter the approving authority.',
+    fields: ['approving_authority_name', 'approving_authority_rank'],
+  },
+  {
+    title: 'Investigation Report Sections',
+    description: 'Generated by AI from your inputs — review and edit before submitting.',
+    fields: ['authority', 'matters_investigated', 'discussion', 'conclusion', 'recommendation'],
   },
 ];
 
-const FULL_WIDTH_FIELDS = new Set(['summary', 'narrative']);
+// §III Facts of the case is the ONE AI-assisted narrative field. It stays bound
+// to the existing `narrative` field (invariant #4) — only its grouping changes.
+// (Declared before SUMMARY_SECTIONS, which references it for Section 5.)
+const OFFICER_AUTHORED_SECTIONS = [
+  { label: 'I. Authority', field: 'authority', rows: 3 },
+  { label: 'II. Matters to be investigated', field: 'matters_investigated', rows: 3 },
+  { label: 'IV. Discussion / Evaluation (optional)', field: 'discussion', rows: 4 },
+  { label: 'V. Conclusion', field: 'conclusion', rows: 4 },
+  { label: 'VI. Recommendation', field: 'recommendation', rows: 3 },
+];
+
+const FULL_WIDTH_FIELDS = new Set([
+  'summary', 'narrative',
+  // PNP body sections read better full-width
+  'authority', 'matters_investigated', 'discussion', 'conclusion', 'recommendation',
+  // Structured detail text fields
+  'complainant_address', 'victim_address', 'suspect_address', 'witness_address',
+  'victim_injuries', 'victim_damage_or_loss', 'suspect_physical_description',
+  'people_involved', 'sequence_of_events', 'actions_of_suspect',
+  'actions_of_victim', 'circumstances_before_incident', 'circumstances_after_incident',
+  'property_description', 'witness_statement', 'evidence_description', 'evidence_location',
+  'cctv_description', 'attached_documents', 'initial_response', 'actions_taken',
+  'evidence_collected', 'persons_interviewed', 'referral_or_endorsement',
+]);
+
+// Multi-line PNP body sections get textareas in the summary cards (same
+// behavior as summary/narrative; Enter inserts a line break instead of commit).
+const TEXTAREA_FIELDS = new Set([
+  'summary', 'narrative',
+  'authority', 'matters_investigated', 'discussion', 'conclusion', 'recommendation',
+  // Structured detail text fields
+  'victim_injuries', 'victim_damage_or_loss', 'suspect_physical_description',
+  'people_involved', 'sequence_of_events', 'actions_of_suspect',
+  'actions_of_victim', 'circumstances_before_incident', 'circumstances_after_incident',
+  'property_description', 'witness_statement', 'evidence_description',
+  'cctv_description', 'attached_documents', 'initial_response', 'actions_taken',
+  'evidence_collected', 'persons_interviewed', 'referral_or_endorsement',
+]);
+
+// Input type overrides for structured detail fields (default is a text input).
+const FIELD_INPUT_TYPES = {
+  complainant_age: 'number', victim_age: 'number', suspect_age: 'number', witness_age: 'number',
+  complainant_contact_number: 'tel', victim_contact_number: 'tel', suspect_address: 'text', witness_contact_number: 'tel',
+  date_reported: 'date', time_reported: 'time', report_date: 'date', report_time: 'time',
+};
+
+// Dropdown options for structured detail fields rendered as selects.
+const SEX_SELECT_OPTIONS = [
+  { value: 'Male', label: 'Male' },
+  { value: 'Female', label: 'Female' },
+  { value: 'Other', label: 'Other' },
+];
+const YES_NO_SELECT_OPTIONS = [
+  { value: 'Yes', label: 'Yes' },
+  { value: 'No', label: 'No' },
+];
+const FIELD_SELECT_OPTIONS = {
+  complainant_sex: SEX_SELECT_OPTIONS,
+  victim_sex: SEX_SELECT_OPTIONS,
+  suspect_sex: SEX_SELECT_OPTIONS,
+  suspect_status: [
+    { value: 'At Large', label: 'At Large' },
+    { value: 'Arrested', label: 'Arrested' },
+    { value: 'Identified', label: 'Identified' },
+    { value: 'Unknown', label: 'Unknown' },
+  ],
+  evidence_available: YES_NO_SELECT_OPTIONS,
+  cctv_available: YES_NO_SELECT_OPTIONS,
+  arrest_made: YES_NO_SELECT_OPTIONS,
+  current_case_status: [
+    { value: 'Under Investigation', label: 'Under Investigation' },
+    { value: 'Cleared', label: 'Cleared' },
+    { value: 'Referred to Prosecutor', label: 'Referred to Prosecutor' },
+    { value: 'Closed', label: 'Closed' },
+  ],
+};
 
 const INITIAL_QUESTIONS = [
   { field: 'incident_type', text: "I'll help you create an incident report. Let's start with the basics — what type of incident is this?" },
@@ -344,11 +626,12 @@ function CreateReportPage() {
   const [saveState, setSaveState] = React.useState('');
   const [toast, setToast] = React.useState({ message: '', type: 'info' });
 
-  // Assistant side panel (desktop): open by default, toggleable from the summary header.
-  const [assistantOpen, setAssistantOpen] = React.useState(true);
-  // Summary bottom sheet (mobile/tablet): collapsed by default; auto-reveals ONCE on first field fill.
-  const [summarySheetOpen, setSummarySheetOpen] = React.useState(false);
-  const panelAutoRevealed = React.useRef(false);
+  // Assistant popover (FAB-triggered): hidden by default. Opening/closing it
+  // NEVER calls the AI — the greeting is a static string and AI requests fire
+  // only when the officer sends a message. One-time conversation flag below is
+  // persisted with the draft so reopening never re-initializes the thread.
+  const [assistantOpen, setAssistantOpen] = React.useState(false);
+  const [hasGreeted, setHasGreeted] = React.useState(false);
   const chatScrollRef = React.useRef(null);
 
   // Chat state
@@ -361,6 +644,15 @@ function CreateReportPage() {
   const [reportId, setReportId] = React.useState(null);
   const [pendingPreset, setPendingPreset] = React.useState(null);
   const [submitting, setSubmitting] = React.useState(false);
+  // Pending AI report draft from the AIReportChat preview (registered via
+  // onRegisterApply). Included automatically when the officer saves/submits —
+  // the same mechanism the Edit page uses — and blocks submit while unresolved
+  // factual findings remain (reviewReady === false).
+  const getPendingAIDraft = React.useRef(null);
+  const [pendingAIDraft, setPendingAIDraft] = React.useState(null);
+  // Post-submit overlay: the finished PNP-formatted document over the page,
+  // with Print. Shown only after submitReport succeeds; close → view page.
+  const [submittedReport, setSubmittedReport] = React.useState(null);
   // Quota cooldown: after a rate-limit rejection, suppress further AI attempts for
   // 60s so the officer isn't spammed with errors and the API isn't hammered.
   const [aiCooldownUntil, setAiCooldownUntil] = React.useState(0);
@@ -373,16 +665,21 @@ function CreateReportPage() {
     setLocalDraftFound(Boolean(window.localStorage.getItem('bluewrite:create-draft')));
   }, []);
 
-  // ── Debounced localStorage draft autosave (unchanged behavior) ─────
+  // ── Debounced localStorage draft autosave — now an envelope carrying the
+  //    form fields PLUS the assistant conversation (messages, question index,
+  //    hasGreeted) so restoring a draft restores the conversation with it. ──
   React.useEffect(() => {
     if (!Object.keys(formData).length) return undefined;
     setSaveState('Saving draft locally...');
     const timer = window.setTimeout(() => {
-      window.localStorage.setItem('bluewrite:create-draft', JSON.stringify(formData));
+      window.localStorage.setItem('bluewrite:create-draft', JSON.stringify({
+        fields: formData,
+        assistant: { messages, currentQuestionIndex, hasGreeted },
+      }));
       setSaveState(`Draft saved locally at ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [formData]);
+  }, [formData, messages, currentQuestionIndex, hasGreeted]);
 
   // ── beforeunload warning (unchanged) ───────────────────────────────
   React.useEffect(() => {
@@ -394,15 +691,6 @@ function CreateReportPage() {
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [formData]);
-
-  // ── Auto-reveal: the first time ANY field gets a value, open the panel
-  //    exactly once. Manual collapse afterwards never re-triggers this. ──
-  React.useEffect(() => {
-    if (!panelAutoRevealed.current && Object.keys(formData).length > 0) {
-      panelAutoRevealed.current = true;
-      setSummarySheetOpen(true);
-    }
   }, [formData]);
 
   // ── Keep the question index in sync with formData (panel edits count too) ──
@@ -429,7 +717,17 @@ function CreateReportPage() {
 
   const restoreDraft = () => {
     try {
-      setFormData(JSON.parse(window.localStorage.getItem('bluewrite:create-draft')) || {});
+      const parsed = JSON.parse(window.localStorage.getItem('bluewrite:create-draft'));
+      // Envelope shape (fields + assistant conversation) since the floating
+      // assistant; older drafts are the flat formData object.
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.assistant?.messages) && parsed.assistant.messages.length) {
+        setFormData(parsed.fields || {});
+        setMessages(parsed.assistant.messages);
+        setCurrentQuestionIndex(parsed.assistant.currentQuestionIndex || 0);
+        setHasGreeted(Boolean(parsed.assistant.hasGreeted));
+      } else {
+        setFormData(parsed || {});
+      }
       setLocalDraftFound(false);
       setToast({ message: 'Local draft restored.', type: 'success' });
     } catch {
@@ -455,10 +753,31 @@ function CreateReportPage() {
     return Object.keys(nextErrors).length === 0;
   };
 
+  // ── Redundancy guard: the guided chat's role-name fields (complainant,
+  // victim, suspect, witness) are derived from the full party sections at
+  // save/submit/AI time — never asked for twice. A name filled in
+  // "Complainant Information" IS the complainant; the officer never re-types it.
+  const withDerivedRoles = (base) => {
+    const derived = { ...base };
+    const roleMap = [
+      ['complainant', 'complainant_full_name'],
+      ['victim', 'victim_full_name'],
+      ['suspect', 'suspect_name'],
+      ['witness', 'witness_name'],
+    ];
+    for (const [role, detailField] of roleMap) {
+      if (!String(derived[role] || '').trim() && String(derived[detailField] || '').trim()) {
+        derived[role] = String(derived[detailField]).trim();
+      }
+    }
+    return derived;
+  };
+
   const saveDraft = async () => {
     if (!validate(false)) return;
     try {
-      const r = await createReport(formData);
+      const payload = withDerivedRoles({ ...formData, ...(getPendingAIDraft.current?.() || {}) });
+      const r = await createReport(payload);
       window.localStorage.removeItem('bluewrite:create-draft');
       navigate(`/officer/reports/${r.data.data.id}/edit`);
     } catch (e) {
@@ -470,15 +789,23 @@ function CreateReportPage() {
     if (validate(true)) setShowSubmitConfirm(true);
   };
 
-  const isSubmitReady = React.useMemo(() => {
-    const nextErrors = {};
-    if (!formData.incident_type?.trim()) nextErrors.incident_type = 'Incident type is required.';
-    if (!formData.incident_date?.trim()) nextErrors.incident_date = 'Incident date is required.';
-    if (!formData.incident_time?.trim()) nextErrors.incident_time = 'Incident time is required.';
-    if (!formData.location?.trim()) nextErrors.location = 'Incident location is required.';
-    if (!formData.narrative || formData.narrative.trim().length < 30) nextErrors.narrative = 'Narrative must be at least 30 characters.';
-    return Object.keys(nextErrors).length === 0;
-  }, [formData]);
+  // ── Generate Report: the AIReportChat panel below handles the full
+  // generate → preview → verify → apply flow (same component as the Edit
+  // page). Its validated draft lands here via onInsertSuggestion and, while a
+  // preview is open, via the registered apply-getter on Save/Submit. ──
+
+  // Single completeness check — reused by the Submit button AND the Generate
+  // Report gate (Step 3). Never write a second, parallel check.
+  const completeness = React.useMemo(() => {
+    const missing = REQUIRED_FIELDS.filter((field) => !(formData[field] || '').trim());
+    const merged = { ...formData, ...(pendingAIDraft || {}) };
+    const narrativeShort = !merged.narrative || merged.narrative.trim().length < 30;
+    const labels = { incident_type: 'incident type', location: 'location', incident_date: 'incident date', incident_time: 'incident time' };
+    const missingLabels = missing.map((field) => labels[field] || field);
+    if (narrativeShort) missingLabels.push('a 30+ character narrative');
+    return { ready: missing.length === 0 && !narrativeShort, missingLabels, narrativeShort };
+  }, [formData, pendingAIDraft]);
+  const isSubmitReady = completeness.ready;
 
   // ── Chat send: chip clicks and composer both route here ───────────
   async function handleSendMessage(rawText) {
@@ -538,7 +865,7 @@ function CreateReportPage() {
     try {
       const response = await extractReportFields({
         message: userMessage,
-        knownFields: formData,
+        knownFields: withDerivedRoles(formData),
         currentDate: new Date().toISOString().split('T')[0],
         currentQuestionField: currentQuestion?.field || null,
       });
@@ -842,6 +1169,23 @@ function CreateReportPage() {
     );
   }
 
+  // "Draft with AI" opens the assistant popover and focuses the composer.
+  // No AI request is fired here — only when the officer sends a message.
+  const draftWithAI = () => {
+    setAssistantOpen(true);
+    window.setTimeout(() => {
+      document.getElementById('report-composer-input')?.focus();
+    }, 250);
+  };
+
+  // FAB toggle. The greeting is static, so first open only flips the persisted
+  // hasGreeted flag — zero network requests, by construction.
+  const toggleAssistant = () => {
+    const next = !assistantOpen;
+    setAssistantOpen(next);
+    if (next && !hasGreeted) setHasGreeted(true);
+  };
+
   const summaryPanel = (
     <SummaryPanelContent
       formData={formData}
@@ -850,11 +1194,30 @@ function CreateReportPage() {
       saveState={saveState}
       hasAnyData={hasAnyData}
       isSubmitReady={isSubmitReady}
+      completeness={completeness}
       submitting={submitting}
+      reportId={reportId}
+      ensureReportId={ensureReportId}
       onFieldChange={handleFieldChange}
       onCancel={() => navigate('/officer/reports')}
       onSaveDraft={saveDraft}
       onSubmit={requestSubmit}
+      aiSlot={
+        <AIReportChat
+          reportId={reportId}
+          reportStatus={reportId ? 'Draft' : ''}
+          reportContext={withDerivedRoles(formData)}
+          onEnsureReportId={ensureReportId}
+          onInsertSuggestion={(draft) => {
+            setFormData((current) => ({ ...current, ...draft }));
+            setToast({ message: 'AI report draft applied. Review every field before submitting.', type: 'success' });
+          }}
+          onRegisterApply={(getter) => {
+            getPendingAIDraft.current = getter;
+            setPendingAIDraft(getter ? getter() : null);
+          }}
+        />
+      }
     />
   );
 
@@ -872,165 +1235,11 @@ function CreateReportPage() {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* ══════════ CHAT PANEL — side panel on desktop (right), main on mobile ══════════ */}
-        <section
-          id="report-assistant-panel"
-          className={`flex min-w-0 flex-1 flex-col bg-white transition-all duration-300 ease-out lg:order-2 lg:flex-none lg:shrink-0 lg:overflow-hidden ${assistantOpen ? 'lg:w-[420px] lg:border-l lg:border-slate-200' : 'lg:w-0 lg:border-l-transparent'}`}
-          aria-label="Report Assistant chat"
-        >
-          {/* Chat header */}
-          <header className="flex-shrink-0 border-b border-slate-200 bg-white px-4 py-3.5 sm:px-6">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-police-blue-100 text-police-blue-700">
-                  <Bot size={18} />
-                </div>
-                <div>
-                  <h2 className="text-[15px] font-bold text-slate-950">Report Assistant</h2>
-                  <p className="text-xs text-slate-600">Answer a few questions to build your report</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="hidden rounded-full bg-police-blue-100 px-2.5 py-1 text-[11.5px] font-semibold text-police-blue-700 sm:inline-flex">
-                  Step {Math.min(currentQuestionIndex + 1, INITIAL_QUESTIONS.length)} of {INITIAL_QUESTIONS.length}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSummarySheetOpen((prev) => !prev)}
-                  className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50 lg:hidden ${summarySheetOpen ? 'border-slate-200 text-slate-600 hover:bg-slate-50' : 'border-slate-300 bg-white text-slate-700 hover:border-police-blue-400 hover:text-police-blue-700'}`}
-                  aria-expanded={summarySheetOpen}
-                  aria-controls="report-summary-sheet"
-                >
-                  {summarySheetOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-                  {summarySheetOpen ? 'Hide summary' : 'Show summary'}
-                </button>
-                {/* Persistent Save/Submit access while the sheet is collapsed (mobile/tablet) */}
-                {!summarySheetOpen && (
-                  <div className="hidden items-center gap-2 md:flex lg:hidden">
-                    <Button size="sm" variant="secondary" onClick={saveDraft} disabled={!hasAnyData}>Save as Draft</Button>
-                    <Button size="sm" onClick={requestSubmit} disabled={!isSubmitReady || submitting}>Submit Report</Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </header>
-
-          {/* Messages */}
-          <div
-            ref={chatScrollRef}
-            className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6"
-            role="log"
-            aria-label="Report building conversation"
-          >
-            {messages.map((msg, idx) => (
-              <div key={idx}>
-                <div className={`flex max-w-[640px] gap-2.5 ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
-                  <div
-                    aria-hidden="true"
-                    className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${msg.role === 'assistant' ? 'bg-police-blue-700 text-white' : 'bg-slate-200 text-slate-700'}`}
-                  >
-                    {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
-                  </div>
-                  <div
-                    className={`inline-block animate-bubble-in rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'assistant' ? 'rounded-tl-sm border border-slate-200 bg-slate-50 text-slate-800' : 'rounded-tr-sm bg-police-blue-700 text-white'}`}
-                  >
-                    {msg.content}
-                  </div>
-                </div>
-                {msg.role === 'assistant' && msg.questionIndex !== undefined && (
-                  <p className="ml-10 mt-1 text-[11px] text-slate-500">
-                    Step {msg.questionIndex + 1} of {INITIAL_QUESTIONS.length}
-                  </p>
-                )}
-                {/* People mini-form: renders inline under the active people question */}
-                {renderPeopleForm(idx)}
-                {/* Date/time pickers: render inline under the active date/time question */}
-                {renderDateTimeForm(idx)}
-                {renderQuestionChips(idx)}
-              </div>
-            ))}
-            {isAiThinking && (
-              <div className="flex gap-2.5" aria-live="polite" aria-label="Assistant is thinking">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-police-blue-700 text-white" aria-hidden="true">
-                  <Bot size={14} />
-                </div>
-                <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-slate-50 px-4 py-3">
-                  <div className="flex gap-1">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} aria-hidden="true" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '150ms' }} aria-hidden="true" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '300ms' }} aria-hidden="true" />
-                    <span className="sr-only">Assistant is thinking</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Writing preset chips — inline in thread once narrative captured */}
-          {formData.narrative && !isAiThinking && (
-            <div className="flex-shrink-0 border-t border-slate-200 bg-white px-4 py-2.5 sm:px-6">
-              <div className="flex flex-wrap gap-2" role="group" aria-label="Writing improvement presets">
-                {WRITING_PRESETS.map((preset) => (
-                  <button
-                    key={preset.key}
-                    type="button"
-                    onClick={() => handleWritingPreset(preset.key)}
-                    disabled={isAiCoolingDown}
-                    className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-police-blue-500 hover:bg-police-blue-100/60 hover:text-police-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50 disabled:cursor-not-allowed disabled:opacity-50"
-                    title={isAiCoolingDown ? 'AI cooling down after usage limit — retry in about a minute' : undefined}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Persistent Save/Submit access while panel is collapsed (narrow viewports) */}
-          {!summarySheetOpen && (
-            <div className="flex flex-shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 sm:px-6 lg:hidden">
-              <Button size="sm" variant="secondary" onClick={saveDraft} disabled={!hasAnyData}>Save as Draft</Button>
-              <Button size="sm" onClick={requestSubmit} disabled={!isSubmitReady || submitting}>Submit Report</Button>
-            </div>
-          )}
-
-          {/* Composer */}
-          <div className="flex-shrink-0 border-t border-slate-200 bg-white px-4 py-3.5 sm:px-6">
-            <div className="flex items-end gap-2.5 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 transition focus-within:border-police-blue-600 focus-within:ring-2 focus-within:ring-police-blue-600/20">
-              <textarea
-                value={composerValue}
-                onChange={(e) => setComposerValue(e.target.value)}
-                placeholder={isAiThinking ? 'Waiting for assistant...' : 'Type your answer or writing instruction...'}
-                rows={1}
-                className="min-h-[24px] max-h-[120px] flex-1 resize-none border-none bg-transparent py-1 text-sm text-slate-900 placeholder-slate-400 outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={isAiThinking}
-                aria-label="Message input"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-              />
-              <Button
-                onClick={() => handleSendMessage()}
-                disabled={isAiThinking || !composerValue.trim()}
-                size="sm"
-                className="h-9 w-9 shrink-0 justify-center !px-0"
-                aria-label="Send message"
-              >
-                <Send size={16} />
-              </Button>
-            </div>
-            <p className="mt-2 text-center text-[11px] text-slate-400">Press Enter to send, Shift+Enter for new line</p>
-          </div>
-        </section>
-
-        {/* ══════════ SUMMARY PANEL (desktop) — MAIN panel ══════════ */}
+        {/* ══════════ SUMMARY PANEL — MAIN content on all viewports ══════════ */}
         <section
           id="report-summary-panel"
           aria-label="Report summary"
-          className="hidden h-full min-h-0 flex-1 flex-col overflow-hidden bg-white lg:order-1 lg:flex"
+          className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-white"
         >
           <header className="flex-shrink-0 border-b border-slate-200 bg-white px-4 py-3.5 sm:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -1040,23 +1249,8 @@ function CreateReportPage() {
                 </div>
                 <div>
                   <h2 className="text-[15px] font-bold text-slate-950">Report Summary</h2>
-                  <p className="text-xs text-slate-600">Your report builds here as you answer — edit any field directly</p>
+                  <p className="text-xs text-slate-600">Your report builds here — edit any field directly, or use the assistant</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <span className="hidden rounded-full bg-police-blue-100 px-2.5 py-1 text-[11.5px] font-semibold text-police-blue-700 sm:inline-flex">
-                  Step {Math.min(currentQuestionIndex + 1, INITIAL_QUESTIONS.length)} of {INITIAL_QUESTIONS.length}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setAssistantOpen((prev) => !prev)}
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[12.5px] font-medium text-slate-700 transition hover:border-police-blue-400 hover:text-police-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50"
-                  aria-expanded={assistantOpen}
-                  aria-controls="report-assistant-panel"
-                >
-                  {assistantOpen ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-                  {assistantOpen ? 'Hide assistant' : 'Show assistant'}
-                </button>
               </div>
             </div>
           </header>
@@ -1064,16 +1258,189 @@ function CreateReportPage() {
         </section>
       </div>
 
-      {/* ══════════ SUMMARY SHEET (mobile/tablet) — bottom sheet ══════════ */}
-      {summarySheetOpen && (
-        <div
-          id="report-summary-sheet"
-          className="fixed inset-x-0 bottom-0 z-40 flex max-h-[62vh] flex-col border-t border-slate-200 bg-white shadow-2xl lg:hidden"
-          role="region"
-          aria-label="Report summary"
-        >
-          <div className="flex flex-col min-h-0 flex-1 overflow-hidden">
-            {summaryPanel}
+      {/* ══════════ FLOATING ASSISTANT — FAB + popover ══════════
+          Open/close never fires an AI request: the greeting is static and AI
+          calls happen only in handleSendMessage / handleAIWritingRequest. */}
+      {assistantOpen && (
+        <>
+          {/* Click-away layer */}
+          <div
+            className="fixed inset-0 z-40"
+            aria-hidden="true"
+            onClick={() => setAssistantOpen(false)}
+          />
+          <div
+            id="report-assistant-popover"
+            role="dialog"
+            aria-label="Report assistant"
+            className="fixed bottom-24 right-4 z-50 flex h-[min(560px,calc(100dvh-8rem))] w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:right-6"
+          >
+            <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-police-blue-700 text-white">
+                  <Bot size={15} />
+                </div>
+                <div>
+                  <p className="text-[13.5px] font-bold leading-tight text-slate-950">Report assistant</p>
+                  <p className="text-[11px] leading-tight text-slate-500">Guided Q&A and writing help</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssistantOpen(false)}
+                className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50"
+                aria-label="Close assistant"
+              >
+                <X size={17} />
+              </button>
+            </header>
+            <div
+              ref={chatScrollRef}
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4"
+              role="log"
+              aria-label="Report building conversation"
+            >
+              {messages.map((msg, idx) => (
+                <div key={idx}>
+                  <div className={`flex max-w-full gap-2.5 ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
+                    <div
+                      aria-hidden="true"
+                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${msg.role === 'assistant' ? 'bg-police-blue-700 text-white' : 'bg-slate-200 text-slate-700'}`}
+                    >
+                      {msg.role === 'assistant' ? <Bot size={14} /> : <User size={14} />}
+                    </div>
+                    <div
+                      className={`inline-block animate-bubble-in rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === 'assistant' ? 'rounded-tl-sm border border-slate-200 bg-slate-50 text-slate-800' : 'rounded-tr-sm bg-police-blue-700 text-white'}`}
+                    >
+                      {msg.content}
+                    </div>
+                  </div>
+                  {msg.role === 'assistant' && msg.questionIndex !== undefined && (
+                    <p className="ml-10 mt-1 text-[11px] text-slate-500">
+                      Step {msg.questionIndex + 1} of {INITIAL_QUESTIONS.length}
+                    </p>
+                  )}
+                  {renderPeopleForm(idx)}
+                  {renderDateTimeForm(idx)}
+                  {renderQuestionChips(idx)}
+                </div>
+              ))}
+              {isAiThinking && (
+                <div className="flex gap-2.5" aria-live="polite" aria-label="Assistant is thinking">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-police-blue-700 text-white" aria-hidden="true">
+                    <Bot size={14} />
+                  </div>
+                  <div className="rounded-2xl rounded-tl-sm border border-slate-200 bg-slate-50 px-4 py-3">
+                    <div className="flex gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '0ms' }} aria-hidden="true" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '150ms' }} aria-hidden="true" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: '300ms' }} aria-hidden="true" />
+                      <span className="sr-only">Assistant is thinking</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            {formData.narrative && !isAiThinking && (
+              <div className="flex-shrink-0 border-t border-slate-200 bg-white px-4 py-2.5">
+                <div className="flex flex-wrap gap-2" role="group" aria-label="Writing improvement presets">
+                  {WRITING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      onClick={() => handleWritingPreset(preset.key)}
+                      disabled={isAiCoolingDown}
+                      className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-police-blue-500 hover:bg-police-blue-100/60 hover:text-police-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50 disabled:cursor-not-allowed disabled:opacity-50"
+                      title={isAiCoolingDown ? 'AI cooling down after usage limit — retry in about a minute' : undefined}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex-shrink-0 border-t border-slate-200 bg-white px-4 py-3">
+              <div className="flex items-end gap-2.5 rounded-2xl border border-slate-300 bg-white px-4 py-2.5 transition focus-within:border-police-blue-600 focus-within:ring-2 focus-within:ring-police-blue-600/20">
+                <textarea
+                  id="report-composer-input"
+                  value={composerValue}
+                  onChange={(e) => setComposerValue(e.target.value)}
+                  placeholder={isAiThinking ? 'Waiting for assistant...' : 'Type your answer or writing instruction...'}
+                  rows={1}
+                  className="min-h-[24px] max-h-[120px] flex-1 resize-none border-none bg-transparent py-1 text-sm text-slate-900 placeholder-slate-400 outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={isAiThinking}
+                  aria-label="Message input"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                />
+                <Button
+                  onClick={() => handleSendMessage()}
+                  disabled={isAiThinking || !composerValue.trim()}
+                  size="sm"
+                  className="h-9 w-9 shrink-0 justify-center !px-0"
+                  aria-label="Send message"
+                >
+                  <Send size={16} />
+                </Button>
+              </div>
+              <p className="mt-2 text-center text-[11px] text-slate-400">Press Enter to send, Shift+Enter for new line</p>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* FAB — always rendered, bottom-right, step badge from currentQuestionIndex */}
+      <button
+        type="button"
+        onClick={toggleAssistant}
+        aria-label={assistantOpen ? 'Close report assistant' : 'Open report assistant'}
+        aria-expanded={assistantOpen}
+        aria-controls="report-assistant-popover"
+        className="fixed bottom-6 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-police-blue-700 text-white shadow-xl transition hover:bg-police-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-police-blue-600/50 focus-visible:ring-offset-2 sm:right-6"
+      >
+        {assistantOpen ? <X size={22} aria-hidden="true" /> : <Bot size={24} aria-hidden="true" />}
+        {!assistantOpen && (
+          <span className="absolute -right-1 -top-1 rounded-full border-2 border-white bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white tabular-nums">
+            {Math.min(currentQuestionIndex + 1, INITIAL_QUESTIONS.length)}/{INITIAL_QUESTIONS.length}
+          </span>
+        )}
+      </button>
+
+      {/* ══════════ POST-SUBMIT OVERLAY — finished document + Print ══════════
+          Shown only after submitReport resolves successfully. Read-only
+          (renders PrintableReport, the same component as the view page).
+          Close → proceeds to the persistent read-only view. */}
+      {submittedReport && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950/70" role="dialog" aria-modal="true" aria-label="Submitted report">
+          <div className="no-print flex flex-shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 size={20} className="text-emerald-600" aria-hidden="true" />
+              <div>
+                <p className="text-[14px] font-bold text-slate-950">Report submitted — {submittedReport.report_number}</p>
+                <p className="text-[11.5px] text-slate-600">The report is now read-only. Print it now or close to view it in your reports.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => { try { await recordReportPrint(submittedReport.id); } finally { window.print(); } }}
+              >
+                Print Report
+              </Button>
+              <Button size="sm" onClick={() => { const id = submittedReport.id; setSubmittedReport(null); navigate(`/officer/reports/${id}`); }}>
+                Close & View Report
+              </Button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-slate-100 px-3 py-4 sm:px-6">
+            <div className="print-report mx-auto max-w-[210mm] rounded-lg bg-white p-6 shadow-lg sm:p-10">
+              <PrintableReport report={submittedReport} />
+            </div>
           </div>
         </div>
       )}
@@ -1084,11 +1451,14 @@ function CreateReportPage() {
         onConfirm={async () => {
           try {
             setSubmitting(true);
-            const created = await createReport(formData);
-            await submitReport(created.data.data.id);
+            const payload = withDerivedRoles({ ...formData, ...(getPendingAIDraft.current?.() || {}) });
+            const created = await createReport(payload);
+            const submitted = await submitReport(created.data.data.id);
             window.localStorage.removeItem('bluewrite:create-draft');
             setShowSubmitConfirm(false);
-            navigate('/officer/reports');
+            // Show the finished document as an overlay instead of an immediate
+            // redirect; closing it proceeds to the persistent read-only view.
+            setSubmittedReport(submitted.data?.data || { ...created.data.data, status: 'Submitted' });
           } catch (e) {
             setShowSubmitConfirm(false);
             setFormMessage(e.response?.data?.message || 'Unable to submit report.');
@@ -1114,9 +1484,14 @@ function CreateReportPage() {
 // SummaryPanelContent — shared body for the desktop main panel and mobile sheet
 // ═══════════════════════════════════════════════════════════════════════
 function SummaryPanelContent({
-  formData, errors, formMessage, saveState, hasAnyData, isSubmitReady, submitting,
+  formData, errors, formMessage, saveState, hasAnyData, isSubmitReady, completeness, submitting,
+  reportId, ensureReportId, aiSlot,
   onFieldChange, onCancel, onSaveDraft, onSubmit,
 }) {
+  const handleFormChange = (e) => {
+    onFieldChange(e.target.name, e.target.value);
+  };
+
   const requiredTotal = REQUIRED_FIELDS.length;
   const requiredDone = REQUIRED_FIELDS.filter((f) => (formData[f] || '').trim()).length;
   const narrativeDone = (formData.narrative || '').trim().length >= 30;
@@ -1158,15 +1533,154 @@ function SummaryPanelContent({
         {SUMMARY_SECTIONS.map((section) => {
           const sectionFields = section.fields;
           const sectionDone = sectionFields.filter((f) => (formData[f] || '').trim()).length;
+          // PNP memorandum sections render as four authorship-distinct zones:
+          // neutral header card, AI-assisted §III (accent border), officer-authored
+          // §I/II/IV–VI (muted), and the signatory card.
+          if (section.title === 'PNP Memorandum Header' || section.title === 'Investigation Report Sections') {
+            if (section.title === 'PNP Memorandum Header') {
+              return (
+                <section key={section.title} className="mb-5 last:mb-2">
+                  <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">{section.title}</h3>
+                    <span className="text-[11px] font-semibold tabular-nums text-slate-400">{sectionDone}/{sectionFields.length} filled</span>
+                  </div>
+                  <p className="mb-2.5 -mt-1.5 text-[11.5px] text-slate-500">{section.description}</p>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                    <p className="mb-3 border-b border-slate-200 pb-2 text-center text-[13px] font-bold uppercase tracking-wide text-navy-800">
+                      Republic of the Philippines · National Police Commission · Philippine National Police
+                    </p>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      <Input label="Regional Office" name="station_region" value={formData.station_region || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.station_region} disabled={submitting} />
+                      <Input label="Station Name" name="station_name" value={formData.station_name || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.station_name} disabled={submitting} />
+                      <Input label="City/Municipality, Province, ZIP Code" name="station_address" value={formData.station_address || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.station_address} disabled={submitting} />
+                      <Input label="Station Email" name="station_email" type="email" value={formData.station_email || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.station_email} disabled={submitting} />
+                      <Input label="Tel. Nr." name="station_contact" value={formData.station_contact || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.station_contact} disabled={submitting} />
+                      <Input label="Memo Recipient (FOR)" name="recipient_office" value={formData.recipient_office || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.recipient_office} disabled={submitting} />
+                    </div>
+                  </div>
+                </section>
+              );
+            }
+            // Investigation Report Sections — rendered in the shape of the
+            // actual PNP investigation report template: AI drafting panel
+            // (gated on completeness), then header → memorandum → §I–VI (all
+            // editable in place) → signatory block.
+            const factsFilled = (formData[FACTS_FIELD] || '').trim().length > 0;
+            const officerFields = OFFICER_AUTHORED_SECTIONS.filter((s) => (formData[s.field] || '').trim());
+            const generatedCount = officerFields.length + (factsFilled ? 1 : 0);
+            const gateReady = completeness.ready;
+            const gateNote = completeness.missingLabels.length
+              ? `Complete ${completeness.missingLabels.join(', ')} to generate the report.`
+              : '';
+            return (
+              <section key={section.title} id="pnp-report-sections" className="mb-5 last:mb-2">
+                <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">{section.title}</h3>
+                  <span className="text-[11px] font-semibold tabular-nums text-slate-400">{generatedCount}/{OFFICER_AUTHORED_SECTIONS.length + 1} filled</span>
+                </div>
+
+                {/* Generate Report — gated on completeness (same check the
+                    Submit button uses). Visible but disabled while incomplete;
+                    no auto-trigger, ever. */}
+                <div className="mb-4" id="ai-report-panel">
+                  {!gateReady && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-[12.5px] text-slate-600 sm:p-5">
+                      <p className="font-semibold text-slate-800">Generate report</p>
+                      <p className="mt-1">{gateNote}</p>
+                    </div>
+                  )}
+                  {gateReady && aiSlot}
+                </div>
+
+                {/* PNP template-formatted preview — every section editable in
+                    place. Layout mirrors investigation_report_template.md. */}
+                <div className="rounded-xl border border-slate-300 bg-white shadow-sm">
+                  {/* Header block */}
+                  <div className="border-b border-slate-300 px-5 py-4 text-center sm:px-8">
+                    <p className="text-[12.5px] font-bold uppercase leading-5 tracking-wide text-navy-800">Republic of the Philippines</p>
+                    <p className="text-[12px] font-bold uppercase leading-5 tracking-wide text-navy-800">National Police Commission</p>
+                    <p className="text-[12px] font-bold uppercase leading-5 tracking-wide text-navy-800">Philippine National Police</p>
+                    {formData.station_region && <p className="text-[11.5px] leading-5 text-slate-600">{formData.station_region}</p>}
+                    {formData.station_name && <p className="text-[12.5px] font-bold uppercase leading-5 text-navy-800">{formData.station_name} Police Station</p>}
+                    {(formData.station_address || formData.station_email || formData.station_contact) && (
+                      <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                        {[formData.station_address, formData.station_email && `Email: ${formData.station_email}`, formData.station_contact && `Tel. Nr.: ${formData.station_contact}`].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Memorandum block */}
+                  <div className="border-b border-slate-300 px-5 py-4 sm:px-8">
+                    <p className="text-[12px] text-slate-600">{formData.report_date ? formatDisplayDate(formData.report_date) : '[Date of report]'}</p>
+                    <p className="mt-2 text-[13px] font-extrabold uppercase tracking-widest text-navy-800">Memorandum</p>
+                    <div className="mt-2 space-y-1 text-[12.5px] text-slate-800">
+                      <p><span className="inline-block w-20 font-bold">FOR</span>: {formData.recipient_office || <span className="text-slate-400">Recipient office</span>}</p>
+                      <p><span className="inline-block w-20 font-bold">SUBJECT</span>: Investigation Report Re: {formData.incident_type || '—'} that transpired at {formData.location || '—'}</p>
+                      <p><span className="inline-block w-20 font-bold">DATE</span>: {formData.incident_date ? formatDisplayDate(formData.incident_date) : '—'}</p>
+                    </div>
+                  </div>
+
+                  {/* Body: §I–VI. The officer never writes these — the AI generates
+                      them from the officer's short inputs (Section 5 "What
+                      Happened" is the only narrative the officer types). They
+                      appear here ONLY after generation, as editable text so the
+                      officer can correct wording before submitting. */}
+                  <div className="space-y-5 px-5 py-5 sm:px-8">
+                    {generatedCount === 0 ? (
+                      <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-[12.5px] text-slate-500">
+                        Sections I–VI will be generated here from your inputs above. Click "Generate Report" — then review and edit the wording before submitting.
+                      </p>
+                    ) : (
+                      <>
+                        {OFFICER_AUTHORED_SECTIONS.filter((s) => ['authority', 'matters_investigated'].includes(s.field)).map(({ label, field, rows }) => (
+                          <Textarea key={field} label={label} name={field} value={formData[field] || ''} onChange={handleFormChange} rows={rows} disabled={submitting} />
+                        ))}
+                        <Textarea label="III. Facts of the case" name={FACTS_FIELD} value={formData[FACTS_FIELD] || ''} onChange={handleFormChange} rows={7} disabled={submitting} />
+                        {OFFICER_AUTHORED_SECTIONS.filter((s) => !['authority', 'matters_investigated'].includes(s.field)).map(({ label, field, rows }) => (
+                          <Textarea key={field} label={label} name={field} value={formData[field] || ''} onChange={handleFormChange} rows={rows} disabled={submitting} />
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  {/* Signatory block */}
+                  <div className="border-t border-slate-300 px-5 py-5 sm:px-8">
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                      <div>
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Investigated by</p>
+                        <Input label="Name" name="officer_name_display" value="" onChange={() => {}} placeholder="Auto — the reporting Officer" disabled />
+                      </div>
+                      <div>
+                        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Approved for filing / Noted by</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input label="Name" name="approving_authority_name" value={formData.approving_authority_name || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.approving_authority_name} disabled={submitting} />
+                          <Input label="Rank" name="approving_authority_rank" value={formData.approving_authority_rank || ''} onChange={handleFormChange} placeholder={FIELD_PLACEHOLDERS.approving_authority_rank} disabled={submitting} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          }
+          // Dynamic type-specific fields — driven by the selected incident type.
+          if (section.title === 'Type-Specific Details') {
+            return (
+              <TypeSpecificSection
+                key={section.title}
+                incidentType={formData.incident_type}
+                typeSpecific={formData.type_specific_data}
+                submitting={submitting}
+                onFieldChange={onFieldChange}
+              />
+            );
+          }
           return (
             <section key={section.title} className="mb-5 last:mb-2">
               <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">{section.title}</h3>
+                <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">{section.formal || section.title}</h3>
                 <span className="text-[11px] font-semibold tabular-nums text-slate-400">{sectionDone}/{sectionFields.length} filled</span>
               </div>
-              {section.title === 'People Involved' && (
-                <p className="mb-2.5 -mt-1.5 text-[11.5px] text-slate-500">{section.description}</p>
-              )}
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {sectionFields.map((field) => (
                   <FieldCard
@@ -1393,14 +1907,18 @@ function FieldCard({ field, label, placeholder, value, error, isRequired, onChan
       return isEmpty ? <span className="italic text-slate-400">—</span> : value;
     }
     if (isEmpty) return <span className="italic text-slate-400">{placeholder || '—'}</span>;
-    if (field === 'incident_date') return <span className="font-medium text-slate-900">{formatDisplayDate(value)}</span>;
-    if (field === 'incident_time') return <span className="font-medium text-slate-900">{formatDisplayTime(value)}</span>;
+    if (field === 'incident_date' || field === 'date_reported' || field === 'report_date') return <span className="font-medium text-slate-900">{formatDisplayDate(value)}</span>;
+    if (field === 'incident_time' || field === 'time_reported' || field === 'report_time') return <span className="font-medium text-slate-900">{formatDisplayTime(value)}</span>;
+    if (FIELD_SELECT_OPTIONS[field]) {
+      const opt = FIELD_SELECT_OPTIONS[field].find((o) => o.value === value);
+      return <span className="font-medium text-slate-900">{opt ? opt.label : value}</span>;
+    }
     return <span className="whitespace-pre-wrap break-words font-medium text-slate-900">{value}</span>;
   };
 
   const renderInput = () => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Enter' && !(field === 'summary' || field === 'narrative')) {
+      if (e.key === 'Enter' && !TEXTAREA_FIELDS.has(field)) {
         e.preventDefault();
         commit();
       }
@@ -1490,6 +2008,20 @@ function FieldCard({ field, label, placeholder, value, error, isRequired, onChan
       );
     }
     if (field === 'incident_date') return <input {...inputProps} type="date" />;
+    if (FIELD_SELECT_OPTIONS[field]) {
+      return (
+        <select
+          {...inputProps}
+          className={`${inputProps.className} cursor-pointer appearance-none`}
+        >
+          <option value="">{placeholder || 'Select'}</option>
+          {FIELD_SELECT_OPTIONS[field].map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    }
+    if (FIELD_INPUT_TYPES[field]) return <input {...inputProps} type={FIELD_INPUT_TYPES[field]} />;
     if (field === 'incident_time') {
       return (
         <TimePicker
@@ -1499,11 +2031,11 @@ function FieldCard({ field, label, placeholder, value, error, isRequired, onChan
         />
       );
     }
-    if (field === 'summary' || field === 'narrative') {
+    if (TEXTAREA_FIELDS.has(field)) {
       return (
         <textarea
           {...inputProps}
-          rows={field === 'narrative' ? 6 : 3}
+          rows={field === 'narrative' ? 6 : field === 'summary' ? 3 : 4}
           className={`${inputProps.className} min-h-[80px] resize-y`}
           placeholder={placeholder}
         />
@@ -1520,12 +2052,12 @@ function FieldCard({ field, label, placeholder, value, error, isRequired, onChan
     <div
       ref={cardRef}
       onBlur={handleCardBlur}
-      className={`group rounded-xl border p-3.5 transition-all duration-200 hover:shadow-sm ${hasError ? 'border-red-300 bg-red-50 ring-1 ring-red-100' : isEmpty ? (isRequired ? 'border-amber-200 bg-amber-50/50' : 'border-slate-200 bg-slate-50') : 'border-police-blue-200 bg-police-blue-100/20'} ${fullWidth ? 'md:col-span-2 xl:col-span-3' : ''}`}
+      className={`group rounded-xl border p-3.5 transition-all duration-200 hover:shadow-sm ${hasError ? 'border-red-300 bg-red-50 ring-1 ring-red-100' : isEmpty ? 'border-slate-200 bg-slate-50' : 'border-police-blue-200 bg-police-blue-100/20'} ${fullWidth ? 'md:col-span-2 xl:col-span-3' : ''}`}
     >
       <div className="relative">
         <div className="flex items-center gap-2 pr-6">
           <span className="text-xs font-bold text-slate-800">{label}</span>
-          {isRequired && <span className="text-amber-600" aria-hidden="true" title="Required">●</span>}
+          {isRequired && <span className="text-slate-400" aria-hidden="true" title="Required">●</span>}
           {hasError && <AlertTriangle size={13} className="text-red-500" aria-hidden="true" />}
           {!isEmpty && !hasError && <CheckCircle2 size={13} className="text-emerald-500" aria-hidden="true" />}
         </div>
@@ -1552,16 +2084,104 @@ function FieldCard({ field, label, placeholder, value, error, isRequired, onChan
           )}
           {hasError && <p id={errorId} className="mt-1 text-xs text-red-600" role="alert">{error}</p>}
           {isEmpty && isRequired && !hasError && (
-            <p className="mt-1 text-[11px] text-amber-700">Required for submission.</p>
+            <p className="mt-1 text-[11px] text-slate-500">Required for submission.</p>
           )}
           {narrativeShort && (
-            <p className="mt-1 text-[11px] text-amber-700">
+            <p className="mt-1 text-[11px] text-slate-500">
               {30 - String(value).trim().length} more characters needed for submission (min. 30).
             </p>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TypeSpecificSection — dynamic fields driven by the selected incident type.
+// Values live in formData.type_specific_data (JSON blob). Rendered as simple
+// labeled inputs (the click-to-edit FieldCard pattern doesn't fit a
+// type-dependent field list that re-renders on every incident-type change).
+// ═══════════════════════════════════════════════════════════════
+function TypeSpecificSection({ incidentType, typeSpecific, submitting, onFieldChange }) {
+  const fields = fieldsForIncidentType(incidentType);
+  const values = typeSpecific && typeof typeSpecific === 'object' ? typeSpecific : {};
+
+  const setValue = (name, value) => {
+    onFieldChange('type_specific_data', { ...values, [name]: value });
+  };
+
+  if (!fields.length) {
+    return (
+      <section className="mb-5 last:mb-2">
+        <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">Type-Specific Details</h3>
+        </div>
+        <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-[12.5px] text-slate-500">
+          Select an incident type above to see its dedicated fields (e.g. stolen item details for Theft, vehicle details for Traffic accident).
+        </p>
+      </section>
+    );
+  }
+
+  const slugs = String(incidentType || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const labels = slugs.map((s) => (s.startsWith('other:') ? TYPE_LABELS.other : TYPE_LABELS[s])).filter(Boolean);
+  const filled = fields.filter((def) => String(values[def.name] || '').trim()).length;
+
+  return (
+    <section className="mb-5 last:mb-2">
+      <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-[12px] font-extrabold uppercase tracking-wider text-slate-500">Type-Specific Details</h3>
+        <span className="text-[11px] font-semibold tabular-nums text-slate-400">{filled}/{fields.length} filled</span>
+      </div>
+      <p className="mb-2.5 -mt-1.5 text-[11.5px] text-slate-500">
+        {labels.length ? `Fields for: ${labels.join(', ')}. All optional.` : 'Fields for the selected incident type. All optional.'}
+      </p>
+      <div className="rounded-xl border border-police-blue-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {fields.map((def) => {
+            const value = values[def.name] || '';
+            if (def.type === 'textarea') {
+              return (
+                <Textarea
+                  key={def.name}
+                  label={def.label}
+                  value={value}
+                  onChange={(e) => setValue(def.name, e.target.value)}
+                  rows={2}
+                  disabled={submitting}
+                  className="md:col-span-2"
+                />
+              );
+            }
+            if (def.type === 'select') {
+              return (
+                <Select
+                  key={def.name}
+                  label={def.label}
+                  value={value}
+                  onChange={(e) => setValue(def.name, e.target.value)}
+                  options={def.options}
+                  placeholder="Select"
+                  disabled={submitting}
+                />
+              );
+            }
+            return (
+              <Input
+                key={def.name}
+                label={def.label}
+                type={def.type === 'number' ? 'number' : 'text'}
+                value={value}
+                onChange={(e) => setValue(def.name, e.target.value)}
+                disabled={submitting}
+              />
+            );
+          })
+          }
+        </div>
+      </div>
+    </section>
   );
 }
 

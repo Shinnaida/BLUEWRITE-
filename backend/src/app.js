@@ -42,7 +42,10 @@ app.get('/api/health', async (req, res) => {
   } catch (dbError) {
     // Keep credentials and raw database errors out of the HTTP response.
   }
-  return success(res, { status: 'ok', database, aiProvider: 'Google AI Studio', ai: env.googleAI.apiKey ? 'configured' : 'not_configured', timestamp: new Date().toISOString(), environment: env.nodeEnv }, 'Service health checked', 200);
+  const localOnly = process.env.OLLAMA_ONLY === 'true';
+  const aiProvider = localOnly ? 'Ollama (local)' : 'Google AI Studio';
+  const aiConfigured = localOnly ? true : Boolean(env.googleAI.apiKey);
+  return success(res, { status: 'ok', database, aiProvider, ai: aiConfigured ? 'configured' : 'not_configured', timestamp: new Date().toISOString(), environment: env.nodeEnv }, 'Service health checked', 200);
 });
 
 // Authenticated Officer AI writing-assistance routes

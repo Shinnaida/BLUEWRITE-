@@ -1,6 +1,5 @@
 const reportService = require('../services/reportService');
 const aiService = require('../services/aiService');
-const env = require('../config/env');
 const { logActivity } = require('../services/logService');
 const { success, error } = require('../utils/response');
 
@@ -17,6 +16,9 @@ const AI_ERROR_MESSAGES = Object.freeze({
   GOOGLE_AI_TIMEOUT: 'Google AI Studio did not respond before the request deadline. Please try again; your entered incident information has not been lost.',
   GOOGLE_AI_UNAVAILABLE: 'Google AI Studio could not be reached or is temporarily unavailable. Please try again; your entered incident information has not been lost.',
   GOOGLE_AI_EMPTY_RESPONSE: 'Google AI Studio returned no report text. Please try again; your entered incident information has not been lost.',
+  LOCAL_AI_UNAVAILABLE: 'The local AI (Ollama) is not reachable. Start Ollama on the server machine and confirm the configured model is pulled; your entered incident information has not been lost.',
+  LOCAL_AI_TIMEOUT: 'The local AI (Ollama) did not respond before the request deadline. Please try again; your entered incident information has not been lost.',
+  LOCAL_AI_EMPTY_RESPONSE: 'The local AI (Ollama) returned no report text. Please try again; your entered incident information has not been lost.',
 });
 
 function safeAIErrorMessage(cause, status) {
@@ -45,6 +47,10 @@ exports.assist = async (req, res) => {
     if (!report) return;
     const result = await aiService.generateReportAssistance({ action, report, formData: req.body?.reportData || {}, writingInstruction, presetKeys });
     const validationCategories = [...new Set([...(result.validation?.issues || []), ...(result.correction?.initialIssues || []), ...(result.structuredFacts?.conflicts || []), ...(result.reportFieldIssues || [])].map((finding) => finding.category))];
+    // Audit trail: casual phrasings auto-replaced with PNP terminology in the generated draft.
+    if (result.terminologyViolations?.length) {
+      await logActivity({ actorUserId: req.user.id, action: 'AI_TERMINOLOGY_AUTO_CORRECTED', targetType: 'Report', targetId: eventTarget(report), description: `Casual phrasing replaced with PNP terminology during AI ${action} for ${eventTarget(report)}.`, metadata: { aiAction: action, violations: result.terminologyViolations }, ipAddress: req.ip }).catch(() => {});
+    }
     await logActivity({ actorUserId: req.user.id, action: aiService.ACTIONS[action].event, targetType: 'Report', targetId: eventTarget(report), description: `AI ${action} suggestion generated for ${eventTarget(report)}.`, metadata: { aiAction: action, aiProvider: result.aiProvider, aiModel: result.aiModel, outcome: result.reviewReady === false ? 'Validation blocked' : 'Success', instructionType: writingInstruction ? (presetKeys.length ? 'Preset and custom' : 'Custom') : (presetKeys.length ? 'Preset' : 'Default'), presetKeys: result.appliedPresetKeys, factualDifferenceWarning: result.factAnalysis.hasWarning, factualCheckCategories: result.factAnalysis.categories || [], validationCategories, validationConfidence: result.validation?.confidence ?? null, retryCount: result.retryCount || 0, reviewReady: result.reviewReady !== false, autoCorrected: Boolean(result.factAnalysis.autoCorrected) }, ipAddress: req.ip });
     for (const category of validationCategories) {
       await logActivity({ actorUserId: req.user.id, action: category, targetType: 'Report', targetId: eventTarget(report), description: `${category} detected during AI ${action} validation for ${eventTarget(report)}.`, metadata: { aiAction: action, retryCount: result.retryCount || 0, confidence: result.validation?.confidence ?? null }, ipAddress: req.ip });
@@ -52,7 +58,7 @@ exports.assist = async (req, res) => {
     if (result.reviewReady === false && !validationCategories.includes('AI_FACT_VALIDATION_FAILED')) await logActivity({ actorUserId: req.user.id, action: 'AI_FACT_VALIDATION_FAILED', targetType: 'Report', targetId: eventTarget(report), description: `AI ${action} draft was blocked from review for ${eventTarget(report)}.`, metadata: { aiAction: action, validationCategories, retryCount: result.retryCount || 0 }, ipAddress: req.ip });
     return success(res, result, 'AI suggestion generated');
   } catch (cause) {
-    if (report) await logActivity({ actorUserId: req.user.id, action: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? 'AI_WRITING_REQUEST_REJECTED' : 'AI_REQUEST_FAILED', targetType: 'Report', targetId: eventTarget(report), description: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? `Rejected an out-of-scope AI writing request for ${eventTarget(report)}.` : `AI ${action} request failed for ${eventTarget(report)}.`, metadata: { aiAction: action, aiProvider: 'Google AI Studio', aiModel: env.googleAI.model, outcome: 'Rejected', reason: cause.code || 'AI_ERROR' }, ipAddress: req.ip }).catch(() => {});
+    if (report) await logActivity({ actorUserId: req.user.id, action: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? 'AI_WRITING_REQUEST_REJECTED' : 'AI_REQUEST_FAILED', targetType: 'Report', targetId: eventTarget(report), description: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? `Rejected an out-of-scope AI writing request for ${eventTarget(report)}.` : `AI ${action} request failed for ${eventTarget(report)}.`, metadata: { aiAction: action, aiProvider: aiService.activeProvider().provider, aiModel: aiService.activeProvider().model, outcome: 'Rejected', reason: cause.code || 'AI_ERROR' }, ipAddress: req.ip }).catch(() => {});
     const status = cause.status || (cause.code === 'AI_INVALID_RESPONSE' ? 502 : 503);
     const message = safeAIErrorMessage(cause, status);
     return error(res, message, status);
@@ -76,7 +82,7 @@ exports.extract = async (req, res) => {
   } catch (cause) {
     // Rate-limited/unavailable — the frontend falls back to local parsing, which
     // is logged separately by the local-extraction endpoint when used.
-    await logActivity({ actorUserId: req.user.id, action: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? 'AI_WRITING_REQUEST_REJECTED' : 'AI_REQUEST_FAILED', targetType: 'Report', targetId: 'UNSAVED_REPORT', description: `AI field extraction request failed during guided report creation.`, metadata: { aiAction: 'extract', aiProvider: 'Google AI Studio', aiModel: env.googleAI.model, outcome: 'Rejected', reason: cause.code || 'AI_ERROR' }, ipAddress: req.ip }).catch(() => {});
+    await logActivity({ actorUserId: req.user.id, action: cause.code === 'AI_WRITING_REQUEST_REJECTED' ? 'AI_WRITING_REQUEST_REJECTED' : 'AI_REQUEST_FAILED', targetType: 'Report', targetId: 'UNSAVED_REPORT', description: `AI field extraction request failed during guided report creation.`, metadata: { aiAction: 'extract', aiProvider: aiService.activeProvider().provider, aiModel: aiService.activeProvider().model, outcome: 'Rejected', reason: cause.code || 'AI_ERROR' }, ipAddress: req.ip }).catch(() => {});
     const status = cause.status || 503;
     return error(res, safeAIErrorMessage(cause, status), status);
   }

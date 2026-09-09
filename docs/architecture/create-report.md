@@ -1,387 +1,151 @@
-# Create Incident Report Page Architecture
+# Create Report Page — Architecture
 
-## Overview
-The Create Incident Report page (`/officer/reports/new`) allows officers to create new incident reports with a comprehensive form, AI writing assistance, local draft persistence, and validation. Built as a React page component within the OfficerLayout.
+Route: `/officer/reports/new` — file: `frontend/src/pages/officer/CreateReportPage.jsx` (~2,200 lines).
+Purpose: officer creates an incident report through a **summary-first** UI (summary panel is the main content; a guided AI chat is a floating popover), then generates the PNP investigation report with AI, verifies it in a template-formatted preview, and submits to a printable read-only view.
 
-## Tech Stack
-- **Frontend**: React 18, Vite, React Router v6
-- **Styling**: Tailwind CSS
-- **State Management**: React useState + localStorage for draft persistence
-- **API Client**: Axios (shared instance from `services/api.js`)
-- **AI Integration**: Custom AIReportChat component + backend Google AI Studio
-- **Icons**: Lucide React
+This doc gives another AI (or a new developer) just enough to work on this page safely.
 
 ---
 
-## Route Structure
+## 1. Component layout
+
 ```
-/officer/reports/new
-  └─ Protected by PrivateRoute (requires OFFICER role + password change complete)
-      └─ Rendered within OfficerLayout (sidebar + header)
-          └─ CreateReportPage component
+CreateReportPage
+├── Draft restore banner          (localStorage 'bluewrite:create-draft' found → Restore / Discard)
+├── SummaryPanelContent           ← MAIN content, all viewports
+│   ├── Progress bar              (Report completion %, REQUIRED_FIELDS + 30-char narrative)
+│   ├── SUMMARY_SECTIONS          (section cards, each = grid of FieldCard click-to-edit cards)
+│   │   ├── 'Type-Specific Details'  → TypeSpecificSection (dynamic, from incident type)
+│   │   ├── 'PNP Memorandum Header'  → station block inputs
+│   │   └── 'Investigation Report Sections' → PNP-TEMPLATE-FORMATTED card:
+│   │       ├── AIReportChat (gated — see §7) or a disabled gate note
+│   │       ├── Header block (Republic of the Philippines / NAPOLCOM / PNP / station)
+│   │       ├── Memorandum block (FOR / SUBJECT / DATE)
+│   │       ├── §I–VI body, editable in place (§III = narrative)
+│   │       └── Signatory block (Investigated by / Approved for filing)
+│   └── action bar                (Save as Draft · Cancel · Submit Report)
+├── Floating assistant popover    (FAB bottom-right, step badge "n/7", click-away close)
+│   └── guided Q&A chat           (INITIAL_QUESTIONS, mini-forms, writing presets)
+└── ConfirmDialog (submit gate) + Toast
 ```
 
-**Route Definition** (`frontend/src/App.jsx:55`):
-```jsx
-<Route path="reports/new" element={<CreateReportPage />} />
-```
+Shared components: `AIReportChat` (`components/ai/AIReportChat.jsx`, also used by Edit page), `TimePicker` (`components/common/TimePicker.jsx`), `Input/Select/Textarea/Button/Toast/ConfirmDialog`.
+
+### TimePicker (redesigned)
+
+`components/common/TimePicker.jsx` — used for `incident_time` (and the guided chat's time mini-form). HH:MM numeric inputs in one bordered container with a static colon, stacked steppers on the right edge (click = 1 minute; **Shift+click or Shift+Arrow = 5 minutes**), an AM/PM segmented toggle, and three quick chips: **Set to now / Round to :00 / Round to :30** (rounding keeps the hour). Commits 24-hour `HH:MM` — same storage format as before; UI-layer only. Any new time field should reuse this component, not `<input type="time">`.
 
 ---
 
-## Component Hierarchy
+## 2. State (single source of truth: `formData`)
 
-```
-CreateReportPage (pages/officer/CreateReportPage.jsx)
-├── ReportForm (components/reports/ReportForm.jsx)
-│   ├── Input (components/common/Input.jsx)
-│   ├── Select (components/common/Select.jsx)
-│   └── Textarea (components/common/Textarea.jsx)
-├── AIReportChat (components/ai/AIReportChat.jsx)
-│   ├── Button, Textarea, HighlightedText (internal)
-│   └── Uses aiService.requestReportAssistance
-├── ConfirmDialog (components/common/Modal.jsx)
-├── Toast (components/common/Toast.jsx)
-└── Button (components/common/Button.jsx)
-```
+| State | Role |
+|---|---|
+| `formData` | **All report data.** Flat object; keys = column names. `type_specific_data` is a nested JSON object. |
+| `errors`, `formMessage` | Validation display |
+| `reportId` | Persisted backend report id (null until first save). `ensureReportId()` creates the report on demand (used by AI actions and save). |
+| `messages`, `currentQuestionIndex`, `hasGreeted`, `assistantOpen` | Guided chat conversation + popover state |
+| `getPendingAIDraft` (ref) + `pendingAIDraft` | Registered apply-getter from `AIReportChat` — a validated open AI preview auto-included on Save/Submit |
+| `submitting`, `aiCooldownUntil` | Submit in flight; 60s AI quota cooldown |
+| `saveState`, `localDraftFound` | Debounced autosave status; restore banner |
+| `completeness` (memo) | **The one completeness check**: `{ ready, missingLabels, narrativeShort }`. Derived from `REQUIRED_FIELDS` + 30-char narrative over `{...formData, ...pendingAIDraft}`. Reused by the Submit button AND the Generate Report gate — never write a parallel check. |
 
----
-
-## Data Flow
-
-### 1. Page Load
-```
-CreateReportPage mounts
-    │
-    ▼
-Check localStorage for 'bluewrite:create-draft'
-    │
-    ▼
-If found → Show "Unsaved local draft found" banner with Restore/Discard
-    │
-    ▼
-Render ReportForm (empty or restored) + AIReportChat (disabled until draft saved)
-```
-
-### 2. Form Interaction
-```
-User edits form fields
-    │
-    ▼
-handleChange → setFormData(newData) → ReportForm re-renders
-    │
-    ▼
-Debounced localStorage save (500ms delay)
-    │
-    ▼
-window.localStorage.setItem('bluewrite:create-draft', JSON.stringify(formData))
-    │
-    ▼
-Update saveState message: "Draft saved locally at HH:MM AM/PM"
-```
-
-### 3. Save as Draft
-```
-User clicks "Save as Draft"
-    │
-    ▼
-validate(false) → checks required fields touched so far
-    │
-    ▼
-createReport(formData) → POST /api/reports
-    │
-    ▼
-Backend: reportController.create → reportService.createReport
-    │
-    ▼
-MySQL: INSERT INTO reports (status='Draft') + INSERT INTO report_people
-    │
-    ▼
-Response: { id, report_number: "BW-2026-000001", ... }
-    │
-    ▼
-localStorage.removeItem('bluewrite:create-draft')
-    │
-    ▼
-navigate(`/officer/reports/${id}/edit`)
-```
-
-### 4. Submit Report
-```
-User clicks "Submit Report"
-    │
-    ▼
-validate(true) → ALL required fields + narrative ≥30 chars
-    │
-    ▼
-ConfirmDialog opens: "Submit Incident Report?"
-    │
-    ▼
-User confirms
-    │
-    ▼
-createReport(formData) → POST /api/reports (if not already saved)
-    │
-    ▼
-submitReport(reportId) → PATCH /api/reports/:id/submit
-    │
-    ▼
-Backend: reportController.submit → reportService.submitReport
-    │
-    ▼
-MySQL: UPDATE reports SET status='Submitted', submitted_at=CURRENT_TIMESTAMP
-    │
-    ▼
-localStorage.removeItem('bluewrite:create-draft')
-    │
-    ▼
-navigate('/officer/reports')
-```
+Derived helpers (module scope, below the constants): `INITIAL_QUESTIONS` (guided flow), `FIELD_LABELS`, `FIELD_PLACEHOLDERS`, `FIELD_SELECT_OPTIONS`, `FULL_WIDTH_FIELDS`, `TEXTAREA_FIELDS`, `DATE_FIELDS/TIME_FIELDS/NUMBER_FIELDS`, `REQUIRED_FIELDS`, `PEOPLE_FIELDS`, `FACTS_FIELD = 'narrative'`, `OFFICER_AUTHORED_SECTIONS`, `INCIDENT_TYPE_KEYWORDS(_EXACT)` (fast-path parsing), `WRITING_PRESETS`.
 
 ---
 
-## Form Fields (ReportForm)
+## 3. Section registry — `SUMMARY_SECTIONS` (chronological, numbered)
 
-### Report Information Section
-| Field | Name | Type | Required | Notes |
-|-------|------|------|----------|-------|
-| Report Number | `report_number` | Input (disabled) | Auto | Auto-generated on save |
-| Incident Type | `incident_type` | Select | Yes | 8 options from constants |
-| Report Title | `title` | Input | No | Brief title |
-| Incident Date | `incident_date` | Input (date) | Yes | |
-| Incident Time | `incident_time` | Input (time) | Yes | |
-| Location | `location` | Input | Yes | Full width on mobile |
+The page renders itself from this registry; add/remove fields here, not in JSX. Order is deliberate (matches the 10-section PNP spec):
 
-### People Involved Section
-| Field | Name | Type | Required |
-|-------|------|------|----------|
-| Complainant | `complainant` | Input | No |
-| Victim | `victim` | Input | No |
-| Suspect | `suspect` | Input | No |
-| Witness | `witness` | Input | No |
+1. **Incident Information** — `incident_type, incident_date/time, date_reported/time_reported, location, specific_place, barangay, city, province`
+2. **Type-Specific Details** — dynamic (see §6)
+3. **Complainant Information** — `complainant_full_name, age, sex, address, contact_number, role`
+4. **Victim Information** — `victim_full_name, age, sex, address, contact, injuries, damage_or_loss`
+5. **Suspect Information** — `suspect_name, alias, age, sex, address, physical_description, status`
+6. **Incident Account** — `summary, what_happened, sequence_of_events, people_involved, actions_of_suspect/victim, circumstances_before/after_incident`
+7. **Property / Damage**, 8. **Witness Information**, 9. **Evidence**, 10. **Police Action**, then **Reporting Officer**, **PNP Memorandum Header**, **Investigation Report Sections**
 
-### Incident Details Section
-| Field | Name | Type | Required | Validation |
-|-------|------|------|----------|------------|
-| Summary | `summary` | Textarea (4 rows) | No | |
-| Narrative | `narrative` | Textarea (10 rows) | Yes (on submit) | ≥30 chars on submit |
-
-**Incident Type Options** (`constants.js:35-44`):
-- theft, assault, burglary, traffic, vandalism, disturbance, fraud, other
+Sections may carry a `formal` label (`Section N · Name`) shown as the card heading. The old name-only "People Involved" section (`complainant/victim/suspect/witness` role fields) was **removed as a duplicate** — those role names are now *derived* (§5).
 
 ---
 
-## Validation Logic (`CreateReportPage.jsx:54-64`)
+## 4. Data persistence
 
-```javascript
-const validate = (isSubmit) => {
-  const nextErrors = {};
-  // Touched field validation (on blur/change)
-  if (isSubmit || formData.incident_type) if (!formData.incident_type?.trim()) nextErrors.incident_type = 'Incident type is required.';
-  if (isSubmit || formData.incident_date) if (!formData.incident_date?.trim()) nextErrors.incident_date = 'Incident date is required.';
-  if (isSubmit || formData.incident_time) if (!formData.incident_time?.trim()) nextErrors.incident_time = 'Incident time is required.';
-  if (isSubmit || formData.location) if (!formData.location?.trim()) nextErrors.location = 'Incident location is required.';
-  // Submit-only validation
-  if (isSubmit && (!formData.narrative || formData.narrative.trim().length < 30)) nextErrors.narrative = 'Narrative must be at least 30 characters.';
-  return Object.keys(nextErrors).length === 0;
-};
-```
+**Local draft** (debounced 500ms, effect keyed on `[formData, messages, currentQuestionIndex, hasGreeted]`):
 
----
-
-## Local Draft Persistence
-
-### Storage Key
-```
-bluewrite:create-draft
-```
-
-### Auto-Save
-- Triggered on every `formData` change
-- 500ms debounce via `setTimeout`
-- Stores full formData object as JSON
-
-### Restore Flow
-1. On mount: check localStorage → show banner if exists
-2. User clicks "Restore Draft" → parse JSON → setFormData
-3. User clicks "Discard Draft" → remove localStorage item
-
-### Before Unload Warning
-```javascript
-window.addEventListener('beforeunload', (event) => {
-  if (Object.keys(formData).length) {
-    event.preventDefault();
-    event.returnValue = 'You have unsaved changes.';
-  }
-});
-```
-
----
-
-## AI Report Assistant (AIReportChat)
-
-### Availability
-- **Disabled** when `reportId === null` (report not yet saved as draft)
-- **Disabled** when `reportStatus !== 'Draft'` (submitted reports)
-- Shows informational message when unavailable
-
-### Features
-| Action | Key | Purpose |
-|--------|-----|---------|
-| Generate Report | `generate` | Create full report draft from narrative |
-| Improve Writing | `improve` | Enhance narrative clarity/grammar |
-| Check Narrative | `check` | Review narrative for issues |
-
-### Writing Presets (6 options)
-- Make more concise
-- Improve grammar and clarity
-- Improve chronological order
-- Use neutral wording
-- Identify details to verify
-- Remove repetition
-
-### Safety Validation
-- **Allowed**: Writing improvements only (grammar, clarity, structure, tone)
-- **Blocked**: Inventing facts, investigative decisions, legal conclusions, unrelated content
-- **Patterns**: `writingIntentPattern` (allow) vs `unsafeWritingPattern` (block)
-
-### Data Sent to AI
-```javascript
-allowedReportData = {
-  title, incident_type, incident_date, incident_time, location,
-  summary, narrative, complainant, victim, suspect, witness
-}
-```
-
-### On Suggestion Accepted
-```javascript
-onInsertSuggestion((draft) => {
-  setFormData((current) => ({ ...current, ...draft }));
-  // Shows toast: "AI report draft applied. Review every field before saving."
-});
-```
-
----
-
-## Backend Integration
-
-### Endpoints Used
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/api/reports` | Create draft report |
-| PATCH | `/api/reports/:id/submit` | Submit draft as final |
-
-### Create Report Request Body
 ```json
-{
-  "title": "string",
-  "incident_type": "theft|assault|burglary|traffic|vandalism|disturbance|fraud|other",
-  "incident_date": "YYYY-MM-DD",
-  "incident_time": "HH:MM",
-  "location": "string",
-  "summary": "string",
-  "narrative": "string",
-  "complainant": "string",
-  "victim": "string",
-  "suspect": "string",
-  "witness": "string"
-}
+// localStorage key: 'bluewrite:create-draft'
+{ "fields": { ...formData }, "assistant": { "messages": [...], "currentQuestionIndex": 0, "hasGreeted": true } }
 ```
 
-### Backend Create Flow (`reportService.js:10`)
-```sql
--- Transaction begins
-INSERT INTO reports (report_number, officer_id, title, incident_type, incident_date, incident_time, location, summary, narrative, status)
-VALUES ('TMP-...', ?, ?, ?, ?, ?, ?, ?, ?, 'Draft')
+Restore handles two shapes: this envelope, or a legacy flat formData object.
 
--- Generate permanent report number
-UPDATE reports SET report_number = 'BW-2026-000001' WHERE id = ?
+**Backend** — `createReport(payload)` → `POST /api/reports` → `reportService.createReport`:
+- flat detail columns (63 `detailFields`), PNP memo columns (`pnpFields`), `type_specific_data` JSON column
+- role name fields (`complainant`, `victim`, `suspect`, `witness`) become rows in `report_people`
+- status starts `'Draft'`; `submitReport(id)` sets `'Submitted'` (read-only afterwards)
 
--- Insert people involved
-INSERT INTO report_people (report_id, person_type, first_name, last_name, ...) VALUES ...
-
--- Log activity
-INSERT INTO activity_logs (actor_user_id, action, target_type, target_id, description, metadata)
-VALUES (?, 'REPORT_CREATED', 'Report', 'BW-2026-000001', 'Created incident report BW-2026-000001.', '{reportStatus: "Draft"}')
-
--- Transaction commits
-```
-
-### Submit Validation (Backend) (`reportService.js:12`)
-```javascript
-const missing = ['incident_type','incident_date','incident_time','location','narrative']
-  .filter(k => !String(old[k] || '').trim());
-
-if (missing.length || old.narrative.trim().length < 30) {
-  throw Error('Required fields missing or narrative too short');
-}
-```
+**After Save as Draft**: navigate to `/officer/reports/:id/edit`.
+**After Submit**: create + submit, then navigate to `/officer/reports/:id` (view page = PNP template render + Print).
 
 ---
 
-## Navigation Routes
+## 5. Redundancy guard — `withDerivedRoles(base)`
 
-| Action | Route | Target Page |
-|--------|-------|-------------|
-| Cancel | `/officer/reports` | MyReportsPage |
-| Save as Draft | `/officer/reports/:id/edit` | EditReportPage |
-| Submit Report | `/officer/reports` | MyReportsPage |
-| View All Reports | `/officer/reports` | MyReportsPage |
+The guided chat historically captured role names (`complainant`, `victim`, `suspect`, `witness`). The full party sections (§3–5 above) capture the same people with more detail. To never ask twice:
 
----
-
-## Error Handling
-
-| Scenario | Handling |
-|----------|----------|
-| API 401 | Redirect to `/login?expired=1` (Axios interceptor) |
-| API 403 | "Only Officers may create reports" / permission message |
-| Validation errors | Inline field errors + formMessage banner |
-| Save draft failure | `formMessage`: "Unable to save report." |
-| Submit failure | `formMessage`: "Unable to submit report." |
-| AI request timeout | Error in AI panel: "Google AI Studio did not respond..." |
-| AI safety refusal | Error in AI panel: "This assistant supports incident-report writing only..." |
+- `withDerivedRoles` copies `complainant_full_name → complainant`, `victim_full_name → victim`, `suspect_name → suspect`, `witness_name → witness` (only when the role field is empty).
+- Applied at: `saveDraft` payload, submit payload, `extractReportFields({ knownFields })`, and `AIReportChat reportContext` (so the AI sees one canonical name per person).
+- The chat can still fill a role name first; the full sections remain the detail source. No field is rendered twice.
 
 ---
 
-## State Management (CreateReportPage)
+## 6. Dynamic type-specific fields
 
-```javascript
-const [formData, setFormData] = useState({});           // All form fields
-const [errors, setErrors] = useState({});               // Validation errors
-const [formMessage, setFormMessage] = useState('');     // General error/success
-const [showSubmitConfirm, setShowSubmitConfirm] = useState(false); // Submit dialog
-const [localDraftFound, setLocalDraftFound] = useState(false);    // localStorage banner
-const [saveState, setSaveState] = useState('');         // Auto-save timestamp
-const [toast, setToast] = useState({ message: '', type: 'info' }); // AI toast
-```
+- Registry: `frontend/src/utils/incidentTypeFields.js` (mirror of `backend/src/services/incidentTypeFields.js` — keep in sync).
+- `fieldsForIncidentType(incidentType)` returns field defs (`name, label, type: text|textarea|number|select, options`) for the selected type(s); multi-select unions sets.
+- Values live in `formData.type_specific_data` (JSON). Common spec fields map to existing columns (e.g. `complainant_name → complainant_full_name`, `police_action_taken → actions_taken`) — never duplicated into the JSON.
+- Backend `sanitizeTypeSpecificData` drops keys not in the registry for the selected type.
+- **Redundancy guard (tested):** a type-specific entry must never duplicate a top-level column fact. Fields that did (`victim_name`, `suspect_name`, `property_description`, `quantity`, `estimated_value`, `type_of_damage`, `estimated_damage_cost`, `cctv_available`, `cctv_description`, `suspect_status`, `suspect_age`, `incident_location` in rape, `victim_injury` in robbery) were **removed** from all 14 type sets. `REMOVED_TO_COMMON` maps each removed key to its column, and `expandRemovedTypeSpecificKeys(data)` (called at the top of `createReport`/`updateReport`) migrates any old JSON values into the shared columns on write — officer-entered column values always win. Asserted in `backend/test/reportDetailFields.test.js` (section 7) so it cannot silently regress.
 
 ---
 
-## Key Files Reference
+## 7. AI integration (call-timing contract — do not regress)
 
-| File | Purpose |
-|------|---------|
-| `frontend/src/pages/officer/CreateReportPage.jsx` | Main page component |
-| `frontend/src/components/reports/ReportForm.jsx` | Form UI with all fields |
-| `frontend/src/components/ai/AIReportChat.jsx` | AI writing assistant |
-| `frontend/src/services/reportService.js` | API calls (createReport, submitReport) |
-| `frontend/src/services/aiService.js` | AI assistance API |
-| `frontend/src/utils/constants.js` | Incident type options |
-| `backend/src/controllers/reportController.js` | Request handlers |
-| `backend/src/services/reportService.js` | Database operations |
-| `frontend/src/components/common/Modal.jsx` | ConfirmDialog |
-| `frontend/src/components/common/Toast.jsx` | Toast notifications |
+**Zero AI calls on mount, on popover open/close, or on any render.** Every AI request traces to an explicit officer action:
+
+| Trigger | Call | Notes |
+|---|---|---|
+| Chat message (guided Q&A) | `extractReportFields` | Fast-path exact answers (`fastPathExtract`) skip AI entirely; local parse fallback when AI is down |
+| Writing preset / free writing instruction | `requestReportAssistance({action:'improve'})` | Validated by `validateWritingRequest`; refused out-of-scope requests never reach the API |
+| **Generate Report button** (in `AIReportChat`, inline in Investigation Report Sections) | `requestReportAssistance({action:'generate'})` | **Gated on `completeness.ready`** — the panel only renders once all required fields + the 30-char narrative are filled; while incomplete a static note lists what's missing. Drafts §I–VI + narrative + title/summary from `reportContext` |
+
+The Generate gate reuses the exact `completeness` memo the Submit button uses — one source of truth. Gating is render-conditional, never an effect: incomplete state shows a note, complete state mounts the panel. No auto-trigger exists in either branch.
+
+`AIReportChat` contract (shared with Edit page):
+- Props: `reportId`, `reportStatus`, `reportContext`, `onInsertSuggestion(draft)`, `onRegisterApply(getter)`, `onEnsureReportId` (Create page passes `ensureReportId` so AI can persist the draft on demand — Edit page omits it).
+- Shows preview: fact confidence, validation issues, locked source facts, proposed fields, original-vs-generated comparison. Blocked drafts (`reviewReady === false`) can't be applied; flagged drafts need the acknowledgment checkbox.
+- `Use Report Draft` → `onInsertSuggestion(reportDraft)` → merged into `formData` (all sections editable).
+- While a preview is open, `onRegisterApply` exposes the validated draft; Save/Submit merges it via `getPendingAIDraft.current?.()`.
+- Quota/rate-limit → `handleQuotaLimited()` sets 60s cooldown.
+
+**AI-authorship boundary**: AI may draft §I–VI + narrative + title/summary ONLY (per explicit product decision, 2026-09). Station header, signatory/approving authority, all structured detail fields, and type-specific JSON are never AI-draftable — enforced server-side (`REPORT_DRAFT_SCHEMA` + `sanitizeGeneratedReportFields` in `aiService.js`) and asserted in `backend/test/reportDetailFields.test.js`.
 
 ---
 
-## Environment Configuration
+## 8. Submission gates
 
-**Frontend** (`frontend/.env.example`):
-```
-VITE_API_BASE_URL=http://localhost:3000/api
-```
+`completeness` (memo) is the single completeness check: `REQUIRED_FIELDS` + 30-char narrative over the merged view `{...formData, ...pendingAIDraft}`. `isSubmitReady = completeness.ready` gates the Submit button. Submit asks `ConfirmDialog` first; status flips to Submitted and the record becomes read-only. After submit the officer lands on `/officer/reports/:id`, which renders the same PNP template layout read-only with Print.
 
-**Backend** - Requires:
-- MySQL database with `reports` and `report_people` tables
-- Google AI Studio API key for AI features
-- Session-based authentication
+## 9. Invariants for anyone editing this file
+
+1. `formData` is the only report-data store; localStorage is a cache, the backend is the record.
+2. Never fire AI requests from effects/mounts — only from explicit user actions. The Generate gate is a render condition, not a trigger.
+3. Add fields via `SUMMARY_SECTIONS` + `FIELD_LABELS`/`FIELD_PLACEHOLDERS` (+ `FULL_WIDTH_FIELDS`/`TEXTAREA_FIELDS`/date/time/number sets as needed), not ad-hoc JSX.
+4. §III narrative stays bound to the `narrative` key (`FACTS_FIELD`).
+5. Keep `withDerivedRoles` applied at every exit point (save, submit, AI context).
+6. Registry changes must be mirrored between `frontend/src/utils/incidentTypeFields.js` and `backend/src/services/incidentTypeFields.js`.
+7. A type-specific registry entry must never duplicate a top-level column fact — if you add a field that overlaps an existing column, extend `COMMON_FIELD_MAPPING` (spec name → column) or `REMOVED_TO_COMMON` instead.
+8. `completeness` is the only completeness check — Submit and the Generate gate must both derive from it.
+9. Time inputs use the shared `TimePicker` component; the value format is always 24-hour `HH:MM`.

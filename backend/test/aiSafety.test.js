@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+// These tests exercise the Google AI Studio path deterministically; the local
+// Ollama mode is covered by runtime verification instead.
+process.env.OLLAMA_ONLY = 'false';
 const {
   WRITING_REQUEST_REFUSAL,
   analyzeProtectedFacts,
@@ -7,6 +10,8 @@ const {
   parseReportDraft,
   sanitizeGeneratedReportFields,
   resolveWritingRequest,
+  enforcePoliceTerminology,
+  POLICE_TERMINOLOGY_RULE,
 } = require('../src/services/aiService');
 const env = require('../src/config/env');
 const googleAIService = require('../src/services/googleAIService');
@@ -52,6 +57,37 @@ for (const request of rejectedRequests) {
     `Expected request to be rejected: ${request}`
   );
 }
+
+// ── PNP terminology policy ─────────────────────────────────────────
+// The generate prompt must carry the police-terminology constraint.
+assert.match(POLICE_TERMINOLOGY_RULE, /POLICE TERMINOLOGY/);
+assert.match(POLICE_TERMINOLOGY_RULE, /complainant/);
+assert.match(POLICE_TERMINOLOGY_RULE, /NEVER use casual/);
+
+// Casual phrasings are auto-replaced with formal PNP equivalents.
+const terminologyCases = [
+  ['He got robbed near the store.', 'He was robbed near the store.'],
+  ['The suspect beat up the victim and ran away.', 'The suspect assaulted the victim and fled.'],
+  ['Two guys showed up and grabbed a bunch of items.', 'Two individuals arrived at the scene and took several items.'],
+  ['The clerk checked out the place after they took off.', 'The clerk inspected the place after they fled.'],
+];
+for (const [casual, formal] of terminologyCases) {
+  const { text: cleaned, violations } = enforcePoliceTerminology(casual);
+  assert.equal(cleaned, formal, `Expected terminology enforcement: "${casual}"`);
+  assert.ok(violations.length > 0, `Expected violations recorded for: "${casual}"`);
+}
+// Formal text passes through untouched.
+assert.equal(enforcePoliceTerminology('Responding officers conducted an ocular inspection at the scene of the incident.').text, 'Responding officers conducted an ocular inspection at the scene of the incident.');
+
+// sanitizeGeneratedReportFields applies terminology enforcement to draft fields.
+const termSanitized = sanitizeGeneratedReportFields(
+  { title: '', incidentType: '', incidentDate: '', incidentTime: '', location: '', summary: '', narrative: 'He got robbed at the market.', people: [] },
+  { title: '', incident_type: '', incident_date: '', incident_time: '', location: '', summary: 'Victim got robbed', narrative: 'He got robbed and the suspect ran away with the phone.', complainant: '', victim: '', suspect: '', witness: '', authority: '', matters_investigated: '', discussion: '', conclusion: '', recommendation: '' }
+);
+assert.equal(termSanitized.draft.narrative.includes('got robbed'), false);
+assert.equal(termSanitized.draft.narrative.includes('was robbed'), true);
+assert.equal(termSanitized.draft.narrative.includes('ran away'), false);
+assert.ok(termSanitized.terminologyViolations.length > 0, 'Terminology violations must be reported');
 
 const allowed = resolveWritingRequest(['concise', 'neutral'], 'Improve transitions between the supplied events.');
 assert.deepEqual(allowed.presetKeys, ['concise', 'neutral']);
@@ -278,7 +314,12 @@ async function verifySingleCorrectiveRetry() {
     assert.match(prompts[0], /STRUCTURED_FACTS_START/);
     assert.match(prompts[0], /"events":/);
     assert.doesNotMatch(prompts[0], /"source_segments":/);
-    assert.doesNotMatch(prompts[0], /"property":/);
+    // Detail contract: labeled property/evidence/pending lists and the
+    // coverage checklist ARE included so the model can cover every fact.
+    assert.match(prompts[0], /"property":/);
+    assert.match(prompts[0], /"pending_actions":/);
+    assert.match(prompts[0], /"coverage_required":/);
+    assert.match(prompts[0], /"statements":/);
     assert.doesNotMatch(prompts[0], /REPORT_DATA_START/);
     assert.doesNotMatch(prompts[1], /red cap/i, 'Unsupported values must not be echoed into the corrective fact prompt.');
     assert.doesNotMatch(prompts[1], /Complainant Maria Santos identified the suspect/i, 'The rejected draft must not be passed back as a fact source.');
